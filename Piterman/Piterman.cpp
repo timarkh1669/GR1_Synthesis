@@ -207,15 +207,36 @@ private:
 		}
 		return val.size();
 	}
+	void print(int numbers[])
+{
+		for (int n : numbers)
+			std::cout << n << std::endl;
+	}
+	unsigned getFirstDelimiterPos(std::vector<std::string> delims, std::string val) {
+		std::pair<int, int> min_index(val.size(),0);
+
+		for (unsigned i = 0; i < delims.size; i++) {
+			if (str.find(delims[i]) < min_index.first) {
+				min_index.first = 1;
+				min_index.second = i;
+			}
+		}
+
+		return val.size();
+	}
 	std::pair<std::string, std::string> getToken(std::string str) {
-		//delimiters: " ", "\t", "\n", "(", ")", "{", "}", ","
-		//std::vector<char> delims = [" ", "\t", "\n", "(", ")", "{", "}", "//", "/*", "*/", ",", ";"];
-		std::string delims = " \t\n,;(){}";
+		std::vector<std::string> delims;
+		delims.push_back(" "); delims.push_back("\t"); delims.push_back("\n"); delims.push_back("(");
+		delims.push_back(")"); delims.push_back("{"); delims.push_back("}"); delims.push_back("//");
+		delims.push_back("/*"); delims.push_back("*/"); delims.push_back(","); delims.push_back(";");
+
+		//std::string delims = " \t\n,;(){}";
 		while ((str.size() > 0) && ((str[0] == ' ') || (str[0] == '\t'))) {
-			str.erase(1);
+			str.erase(0, 1);
 		}
 		unsigned pos = getFirstDelimiterPos(delims, str);
-		return std::make_pair(str.substr(0, pos), str.erase(0, pos));
+		std::string part1 = str.substr(0, pos);
+		return std::make_pair(part1, str.erase(0, pos));
 	}
 
 public:
@@ -813,6 +834,7 @@ void universal_Arbiter_setData(unsigned N) {
 
 void getSMVModules(std::string filename) {
 	FileText file(filename);
+	file.printFile(std::cout);
 	FileTokens tokenFile(file.tokenize());
 
 	tokenFile.printFile(std::cout);
