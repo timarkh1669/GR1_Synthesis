@@ -9,10 +9,9 @@
 #include <map>
 #include <regex>
 #include <fstream>
+#include <ostream>
 #include <sstream>
 #include <time.h>
-
-#define FileText std::vector<std::string>
 
 bdd p_e,//environment transition relation
 	p_s,//system transition relation
@@ -145,6 +144,13 @@ class Variable {
 private:
 	std::string name;
 	int id;
+
+	unsigned log2(int k) {
+		unsigned log = 0;
+		while (k >>= 1) log++;
+		return log;
+	}// end log2
+
 public:
 	//constructors:
 	Variable(std::string name_str) {
@@ -155,7 +161,7 @@ public:
 	Variable(std::string name_str, std::vector<std::string> values) {
 		name = name_str;
 		id = bdd_varnum();//??!!!
-		bdd_extvarnum(log2(values.size) * 2);
+		bdd_extvarnum(log2(values.size()) * 2);
 	}
 	// end constructors
 	std::string Name() { return name; }
@@ -171,22 +177,53 @@ private:
 	bdd transition;
 	bdd justice;
 public:
+	SMVModule() {
+		moduleName = "";
+		initial = bddfalsepp;
+		transition = bddtruepp;
+		justice = bddtruepp;
+	}
 	SMVModule(std::string name) {
 		moduleName = name;
 		initial = bddfalsepp;
+		transition = bddtruepp;
+		justice = bddtruepp;
 	}
-	std::string Name() { return moduleName; }
-	bdd Initial() { return initial; }
+	std::string GetName() { return moduleName; }
+	void SetName(std::string name) { moduleName = name; }
+	bdd GetInitial() { return initial; }
+	void SetInitial(bdd ini) { initial = ini; }
 	std::vector<Variable> Variables() { return vars; }
 };//end class SMVModule
 
 class FileText {
 private:
 	std::vector<std::string> text;
+	unsigned getFirstDelimiterPos(std::string delims, std::string val) {
+		for (unsigned i = 0; i < val.size(); i++) {
+			for (unsigned j = 0; j < delims.size(); j++) {
+				if (val[i] == delims[j]) return i;
+			}
+		}
+		return val.size();
+	}
+	std::pair<std::string, std::string> getToken(std::string str) {
+		//delimiters: " ", "\t", "\n", "(", ")", "{", "}", ","
+		//std::vector<char> delims = [" ", "\t", "\n", "(", ")", "{", "}", "//", "/*", "*/", ",", ";"];
+		std::string delims = " \t\n,;(){}";
+		while ((str.size() > 0) && ((str[0] == ' ') || (str[0] == '\t'))) {
+			str.erase(1);
+		}
+		unsigned pos = getFirstDelimiterPos(delims, str);
+		return std::make_pair(str.substr(0, pos), str.erase(0, pos));
+	}
+
 public:
+	FileText() {
+	}
 	FileText(std::string fileName) {
 		std::ifstream file(fileName);
-		text = [];
+
 		//вызывается функция file.open();
 		//file.open(filename); !!! удалить, если не нужно
 
@@ -205,7 +242,7 @@ public:
 		// [TA] here we should delete comments and special symbols(!!!)
 		std::vector<std::string> result;
 		std::pair<std::string, std::string> token;
-		for (int i = 0; i < text.size(); i++) {
+		for (unsigned i = 0; i < text.size(); i++) {
 			token = getToken(text[i]);
 			std::string res_str = "";
 			// check //, /*
@@ -228,19 +265,130 @@ public:
 		}
 		text = result;
 	}
+	std::vector<std::string> tokenize() {
+		std::vector<std::string> res;
+		std::pair<std::string, std::string> token;
+		for (unsigned i = 0; i < text.size(); i++) {
+			token = getToken(text[i]);
+			while(token.first != "") {
+				res.push_back(token.first);
+				token = getToken(token.second);
+			}
+		}
+		return res;
+	}
+	void printFile(std::ostream& stream) {
+		for (unsigned i = 0; i < text.size(); i++) {
+			stream << text[i] << std::endl;
+		}
+	}
+};
+class FileTokens {
+private:
+	std::vector<std::string> tokens;
+public:
+	FileTokens(FileText fileText) {
+		tokens = fileText.tokenize();
+	}
+	FileTokens(std::vector<std::string> fileText) {
+		tokens = fileText;
+	}
+	std::vector<std::string> getModuleNames() {
+		std::vector<std::string> res;
+		return res;
+	}
+	void removeExtraData() {
+		std::vector<std::string> tokens_clear;
+		for (unsigned i = 0; i < tokens.size(); i++) {
+			if (tokens[i] == "//") {
+				while((tokens[i] != "\n") && (tokens[i] != "")) {
+					i++;
+				}
+			}
+			if (tokens[i] == "/*") {
+				while(tokens[i++] != "*/")
+					if (tokens[i] == "") throw("Comment is not closed");
+			}
+			if (tokens[i] != "*/") tokens_clear.push_back(tokens[i]);
+		}
+		tokens = tokens_clear;
+	}
+	SMVModule getModule(std::string name) {
+		SMVModule res;
+		bool moduleExist_flag = false;
+		//======================
+		// Main parser!
+		//======================
+		int state = 0;
+		std::string part;
+		std::map<std::string, int> statesMap;
+			statesMap["MODULE"]= 0;
+			statesMap[""]= 1;
+			statesMap[""]= 2;
+			statesMap["VAR"]= 3;
+			statesMap["ASSIGN"]= 4;
+			statesMap["TRANS"]= 5;
+			statesMap["JUSTICE"]= 6;
+			statesMap["MODULE"]= 7;
+			//statesMap[""]= 8;
+		
+		for (unsigned i = 0; i < tokens.size(); i++) {
+			while(true) {
+				switch(state) {
+					//0: read module with requested name
+					//1: read MODULE agruments
+					//2: 
+					//3: 
+				case 0: {
+					//if (tmp.first == "") throw("NoSuchModuleException");//check how to throw exceptions!!!
+					if (tokens[i++] == "MODULE") {
+						if (tokens[i++] != name) { break; }
+						if (tokens[i++] != "(") { break; }//throw Exception!!!
+						state = 1;
+					}
+					break;
+				}
+				case 1: {
+					if (tokens[i] == ")") {
+						state = 2;
+						part = tokens[i++];
+						break;
+					}
+				}
+				case 2: {
+					state = statesMap[tokens[i]];
+					if (state) {}
+					break;
+				}
+				case 3: {
+				
+				}
+			}
+				// and start creating module!!!
+				SMVModule M(name);
+			}
+		}
+		SMVModule module(name);
+		return res;
+	}
+	void printFile(std::ostream& stream) {
+		for (unsigned i = 0; i < tokens.size(); i++) {
+			stream << tokens[i] << " " << std::endl;
+		}
+	}
 };
 
 void readArbiter2Data(std::string filename) {
 	//variables positions:
 	//	0	1	2	3	4	5	6	7	8	9
 	//	r1	r2	g1	g2	r1'	r2'	g1'	g2'	jx1	jx2
-
-	FileText file = getFile_stringVector(filename);
+/*
+	FileText file(filename);
 	std::pair<std::string, std::string> tmp;
 
 	bdd_init(10000,1000);
 	init = bddtrue;
-	FileText env, sys;
+	FileText env(), sys();
 	for(int i = 0; i < file.size; i++) {
 		tmp = getToken(file[i]);
 		if (tmp.first != "MODULE") continue;
@@ -294,7 +442,7 @@ void readArbiter2Data(std::string filename) {
 	x_strat.resize(2);
 	y_strat.resize(2);
 
-	init = !r1 & !g1 & !r2 & !g2;
+	init = !r1 & !g1 & !r2 & !g2;*/
 }// end readArbiter2Data
 
 unsigned log2(int k) {
@@ -663,102 +811,19 @@ void universal_Arbiter_setData(unsigned N) {
 	y_strat.resize(N);
 }// end universal_Arbiter_setData
 
-FileText getFile_stringVector(std::string filename) {
-	
-}
-void printFile(FileText file) {
-	for (int i = 0; i < file.size(); i++) {
-		std::cout << file[i] << std::endl;
-	}
-}
-int getFirstDelimiterPos(std::string delims, std::string val) {
-	for (int i = 0; i < val.size; i++) {
-		for (int j = 0; j < delims.size; j++) {
-			if (val[i] == delims[j]) return i;
-		}
-	}
-	return val.size;
-}
-std::pair<std::string, std::string> getToken(std::string str) {
-	//delimiters: " ", "\t", "\n", "(", ")", "{", "}", ","
-	//std::vector<char> delims = [" ", "\t", "\n", "(", ")", "{", "}", "//", "/*", "*/", ",", ";"];
-	std::string delims = " \t\n,;(){}";
-	while ((str.size() > 0) && ((str[0] == ' ') || (str[0] == '\t'))) {
-		str.erase(1);
-	}
-	int pos = getFirstDelimiterPos(delims, str);
-	return std::make_pair(str.substr(0, pos), str.erase(pos));
-}
-
-void getSMVModule(FileText file, std::string name) {
-	bool moduleExist_flag = false;
-	//======================
-	// Main parser!
-	//======================
-	int state = 0;
-	std::string part;
-	std::map<std::string, int> statesMap;
-		statesMap["MODULE"]= 0;
-		statesMap[""]= 1;
-		statesMap[""]= 2;
-		statesMap["VAR"]= 3;
-		statesMap["ASSIGN"]= 4;
-		statesMap["TRANS"]= 5;
-		statesMap["JUSTICE"]= 6;
-		statesMap["MODULE"]= 7;
-		//statesMap[""]= 8;
-		
-	for (int i = 0; i < file.size; i++) {
-		part = file[i];
-		while(true) {
-			std::pair<std::string, std::string> tmp = getToken(part);
-			switch(state) {
-				//0:
-				//1: read MODULE agruments
-				//2: 
-				//3: 
-			case 0: {
-				//if (tmp.first == "") throw("NoSuchModuleException");//check how to throw exceptions!!!
-				if (tmp.first == "MODULE") {
-					tmp = getToken(tmp.second);
-					if (tmp.first != name) { break; }
-					tmp = getToken(tmp.second);
-					if (tmp.first != "(") { break; }//throw Exception!!!
-					state = 1;
-				}
-				part = tmp.second;
-				break;
-			}
-			case 1: {
-				if (tmp.first == ")") {
-					state = 2;
-					part = tmp.second;
-					break;
-				}
-			}
-			case 2: {
-				state = statesMap[tmp.first];
-				if (state) {}
-				break;
-			}
-			case 3: {
-				
-			}
-		}
-			// and start creating module!!!
-			SMVModule M(name);
-		}
-	}
-	SMVModule module(name);
-}
-
 void getSMVModules(std::string filename) {
-	FileText1 file(filename);
-	printFile(file);
-	file.removeExtraData();
-	getSMVModule(file, "main");
-	getSMVModule(file, "env");
-	getSMVModule(file, "sys");
+	FileText file(filename);
+	FileTokens tokenFile(file.tokenize());
+
+	tokenFile.printFile(std::cout);
+	tokenFile.removeExtraData();
+	std::cout<<"\n\n\n";
+	file.printFile(std::cout);
+
+	//getSMVModule(file, "main");
+	//getSMVModule(file, "env");
+	//getSMVModule(file, "sys");
+
 	//Основные лексемы:
 	//	/*, */
 	//	//
@@ -1024,25 +1089,3 @@ int main(void)
 	out << "Controller nodes count: " << bdd_satcount(forsome_next_V(allReachableTrans(trans)) & bdd_ithfun(0, env1_pr, envCnt) & bdd_ithfun(0, sys1_pr, sysCnt) & tojx[0]) << std::endl;
 	out.close();*/
 	
-
-/*
-case 0: {
-				if (tmp.first == "/") state = 1;
-				break;
-			}
-			case 1: {
-				if (tmp.first == "/") state = 2;
-				if (tmp.first == "*") state = 3;
-				break;
-			}
-			case 2: {
-				while((tmp.second != "\n") && (tmp.second != "")) {
-					tmp = getToken(part);
-				}
-			}
-			case 3: {
-				while(true) {
-					tmp = getToken(part);
-				}
-			}
-			*/
