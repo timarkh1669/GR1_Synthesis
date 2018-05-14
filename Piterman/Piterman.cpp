@@ -199,6 +199,8 @@ public:
 class FileText {
 private:
 	std::vector<std::string> text;
+	std::vector<std::string> delims;
+
 	unsigned getFirstDelimiterPos(std::string delims, std::string val) {
 		for (unsigned i = 0; i < val.size(); i++) {
 			for (unsigned j = 0; j < delims.size(); j++) {
@@ -207,40 +209,37 @@ private:
 		}
 		return val.size();
 	}
-	void print(int numbers[])
-{
-		for (int n : numbers)
-			std::cout << n << std::endl;
-	}
-	unsigned getFirstDelimiterPos(std::vector<std::string> delims, std::string val) {
-		std::pair<int, int> min_index(val.size(),0);
+	std::pair<int, int> getFirstDelimiterPos(std::vector<std::string> delims, std::string val) {
+		std::pair<int, int> min_index(val.size() + 1, delims.size());
 
-		for (unsigned i = 0; i < delims.size; i++) {
-			if (str.find(delims[i]) < min_index.first) {
-				min_index.first = 1;
+		for (unsigned i = 0; i < delims.size(); i++) {//[TA] !!! need some optimisation
+			int index = val.find(delims[i]);
+			if ((index >= 0) && (index < min_index.first)) {
+				min_index.first = index;
 				min_index.second = i;
 			}
 		}
 
-		return val.size();
+		return min_index;
 	}
 	std::pair<std::string, std::string> getToken(std::string str) {
-		std::vector<std::string> delims;
-		delims.push_back(" "); delims.push_back("\t"); delims.push_back("\n"); delims.push_back("(");
-		delims.push_back(")"); delims.push_back("{"); delims.push_back("}"); delims.push_back("//");
-		delims.push_back("/*"); delims.push_back("*/"); delims.push_back(","); delims.push_back(";");
-
-		//std::string delims = " \t\n,;(){}";
 		while ((str.size() > 0) && ((str[0] == ' ') || (str[0] == '\t'))) {
 			str.erase(0, 1);
 		}
-		unsigned pos = getFirstDelimiterPos(delims, str);
-		std::string part1 = str.substr(0, pos);
-		return std::make_pair(part1, str.erase(0, pos));
+		std::pair<int, int> pos = getFirstDelimiterPos(delims, str);
+		if ((pos.first == 0) && (pos.second < delims.size())) {
+			return std::make_pair(delims[pos.second], str.erase(0, delims[pos.second].size()));
+		} else {
+			std::string part1 = str.substr(0, pos.first);
+			return std::make_pair(part1, str.erase(0, pos.first));
+		}
 	}
 
 public:
 	FileText() {
+		delims.push_back(" "); delims.push_back("\t"); delims.push_back("\n"); delims.push_back("(");
+		delims.push_back(")"); delims.push_back("{"); delims.push_back("}"); delims.push_back("//");
+		delims.push_back("/*"); delims.push_back("*/"); delims.push_back(","); delims.push_back(";");
 	}
 	FileText(std::string fileName) {
 		std::ifstream file(fileName);
@@ -255,9 +254,14 @@ public:
 			// возвращает свой объект istream, в условии проверяется состояние iostate флагa, значение этого флага будет ложным, если достигнет конца файла, или будет ошибка ввода или читаемого типа
 			std::string tmp;
 			while (getline(file,tmp))
-				text.push_back(tmp);
+				text.push_back(tmp + "\n");
 		}
 		file.close();
+
+		delims.push_back(" "); delims.push_back("\t"); delims.push_back("\n"); delims.push_back("(");
+		delims.push_back(")"); delims.push_back("{"); delims.push_back("}"); delims.push_back("//");
+		delims.push_back("/*"); delims.push_back("*/"); delims.push_back(","); delims.push_back(";");
+
 	}
 	void removeExtraData() {
 		// [TA] here we should delete comments and special symbols(!!!)
@@ -300,7 +304,7 @@ public:
 	}
 	void printFile(std::ostream& stream) {
 		for (unsigned i = 0; i < text.size(); i++) {
-			stream << text[i] << std::endl;
+			stream << text[i];
 		}
 	}
 };
@@ -334,8 +338,7 @@ public:
 		}
 		tokens = tokens_clear;
 	}
-	SMVModule getModule(std::string name) {
-		SMVModule res;
+	SMVModule getSMVModule(std::string name) {
 		bool moduleExist_flag = false;
 		//======================
 		// Main parser!
@@ -343,58 +346,91 @@ public:
 		int state = 0;
 		std::string part;
 		std::map<std::string, int> statesMap;
-			statesMap["MODULE"]= 0;
-			statesMap[""]= 1;
-			statesMap[""]= 2;
-			statesMap["VAR"]= 3;
-			statesMap["ASSIGN"]= 4;
-			statesMap["TRANS"]= 5;
-			statesMap["JUSTICE"]= 6;
-			statesMap["MODULE"]= 7;
+			statesMap["MODULE"] = -1; // not zero because if we read "MODULE" token while reading our module, this means our module description is ended
+			statesMap[""] = 1;
+			statesMap["\n"] = 2;
+			statesMap["VAR"] = 3;
+			statesMap["ASSIGN"] = 4;
+			statesMap["TRANS"] = 5;
+			statesMap["JUSTICE"] = 6;
+			statesMap["MODULE"] = 7;
 			//statesMap[""]= 8;
 		
 		for (unsigned i = 0; i < tokens.size(); i++) {
-			while(true) {
-				switch(state) {
-					//0: read module with requested name
-					//1: read MODULE agruments
-					//2: 
-					//3: 
-				case 0: {
-					//if (tmp.first == "") throw("NoSuchModuleException");//check how to throw exceptions!!!
-					if (tokens[i++] == "MODULE") {
-						if (tokens[i++] != name) { break; }
-						if (tokens[i++] != "(") { break; }//throw Exception!!!
-						state = 1;
-					}
+			switch(state) {
+				//0: read module with requested name
+				//1: read MODULE agruments
+				//2: 
+				//3: 
+			case 0: { // read MODULE with requested name
+				//if (tmp.first == "") throw("NoSuchModuleException");//check how to throw exceptions!!!
+				if (tokens[i++] == "MODULE") {
+					if (tokens[i++] != name) { break; }//throw Exception!!!
+					if (tokens[i] == "\n") { state = 2; i++; break; }
+					if (tokens[i] == "(") { state = 1; i++; break; }
+					state = 1;
+				}
+				break;
+			}
+			case 1: { // read MODULE agruments
+				if (tokens[i] == ")") {
+					state = 2;
+					part = tokens[i++];
 					break;
 				}
-				case 1: {
-					if (tokens[i] == ")") {
-						state = 2;
-						part = tokens[i++];
-						break;
-					}
-				}
-				case 2: {
-					state = statesMap[tokens[i]];
-					if (state) {}
-					break;
-				}
-				case 3: {
-				
-				}
 			}
-				// and start creating module!!!
-				SMVModule M(name);
+			case 2: { // 
+				state = statesMap[tokens[i]];
+				if (state > 0) { break; }
+				// else
+				//throw Exception!!!
+				state = -1;
 			}
+			case 3: {
+				std::string token = tokens[++i];
+			}		
+			case 4: {
+				std::string token = tokens[++i];
+			}
+			case 5: {
+				std::string token = tokens[++i];
+			}
+			case 6: {
+				std::string token = tokens[++i];
+			}
+			}// end switch
 		}
 		SMVModule module(name);
-		return res;
+		return module;
+	}// end getSMVModule
+
+	void getSMVModules() {
+		getSMVModule("main");
+		getSMVModule("env");
+		getSMVModule("sys");
+		
+		//Основные лексемы:
+		//	MODULE
+		//	modulename
+		//	VAR
+		//	varname
+		//	space
+		//	
+		//	->
+		//	&
+		//	|
+		//	(,)
+		//	
+	
+		//bdd_init(10000000,1000000);//[TA] what to set here?
+		//bdd_setcacheratio(10);
+	
+		//bdd_setvarnum();
+
 	}
 	void printFile(std::ostream& stream) {
 		for (unsigned i = 0; i < tokens.size(); i++) {
-			stream << tokens[i] << " " << std::endl;
+			stream << tokens[i] << " ";
 		}
 	}
 };
@@ -832,44 +868,6 @@ void universal_Arbiter_setData(unsigned N) {
 	y_strat.resize(N);
 }// end universal_Arbiter_setData
 
-void getSMVModules(std::string filename) {
-	FileText file(filename);
-	file.printFile(std::cout);
-	FileTokens tokenFile(file.tokenize());
-
-	tokenFile.printFile(std::cout);
-	tokenFile.removeExtraData();
-	std::cout<<"\n\n\n";
-	file.printFile(std::cout);
-
-	//getSMVModule(file, "main");
-	//getSMVModule(file, "env");
-	//getSMVModule(file, "sys");
-
-	//Основные лексемы:
-	//	/*, */
-	//	//
-	//	MODULE
-	//	modulename
-	//	VAR
-	//	varname
-	//	space
-	//	
-	//	->
-	//	&
-	//	|
-	//	(,)
-	//	
-	
-	std::cout << "\n\n";
-	//
-	//bdd_init(10000000,1000000);//[TA] what to set here?
-	//bdd_setcacheratio(10);
-	
-	//bdd_setvarnum();
-
-}
-
 bdd toSymbStrategy(bdd z) {
 	bdd trans = bddfalse;
 
@@ -1054,7 +1052,10 @@ int printDot(std::ostream &out, bdd & bddtrans)
 
 int main(void)
 {
-	getSMVModules("arbiterTEST.smv");
+	FileText file("arbiterTEST.smv");
+	FileTokens tokenFile(file.tokenize());
+	tokenFile.removeExtraData();//remove all comments
+	tokenFile.getSMVModules();
 	//setArbiter2Data();
 	cox_cnt = 0; gfpz_cnt = 0; lfp_cnt = 0; gfpx_cnt = 0; time1 = 0; time1_1 = 0; time2 = 0; time2_2 = 0; time3 = 0; time4 = 0;//[TA] delete!!!
 	/*
