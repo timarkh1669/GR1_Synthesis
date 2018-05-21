@@ -289,17 +289,8 @@ private:
 	std::vector<std::string> text;
 	std::vector<std::string> tokenText;
 	std::vector<std::string> delims;
-	std::vector<SMVModule> allModules;
+	std::vector<SMVModule*> allModules;
 
-	/*unsigned getFirstDelimiterPos(std::string delims, std::string val) {
-		for (unsigned i = 0; i < val.size(); i++) {
-			for (unsigned j = 0; j < delims.size(); j++) {
-				if (val[i] == delims[j]) return i;
-			}
-		}
-		return val.size();
-	}Delete later!!!*/
-	
 	std::pair<int, unsigned> getFirstDelimiterPos(std::vector<std::string> delims, std::string val) {
 		std::pair<int, unsigned> min_index(val.size() + 1, delims.size());
 
@@ -335,7 +326,7 @@ private:
 		if (b) { //[TA] change this condition!!!
 			b = false;
 			for (unsigned i = 0; i < allModules.size(); i++) {
-				std::vector<Variable> vars_ithSet = allModules[i].GetInternalVariables();
+				std::vector<Variable> vars_ithSet = allModules[i]->GetInternalVariables();
 
 				for (unsigned i = 0; i < vars_ithSet.size(); i++) {
 					bdd_setpair(sysEnv_primePair, vars_ithSet[i].Id(), vars_ithSet[i].NextId());
@@ -346,14 +337,14 @@ private:
 		return bdd_replace(func, sysEnv_primePair);
 	}// end next
 
-	SMVModule GetModule(std::string moduleName) {
+	SMVModule* GetModule(std::string moduleName) {
 		for (unsigned i = 0; i < allModules.size(); i++)
-			if (allModules[i].GetName() == moduleName) return allModules[i];
+			if (allModules[i]->GetName() == moduleName) return allModules[i];
 		//else
-		return NULL;
+		return NULL;//throw Exception
 	}
 
-	std::pair<int, bdd> getBDD(int i, std::string stop_sym, SMVModule module) {
+	std::pair<int, bdd> getBDD(int i, std::string stop_sym, SMVModule* module) {
 		bdd res = bddtrue;
 		int prev_operator = bddop_and;
 
@@ -391,7 +382,7 @@ private:
 						i = temp.first;
 						res = bdd_apply(res, bdd_not(temp.second), prev_operator);
 					} else {
-						res = bdd_apply(res, bdd_not(module.GetVariable(tokenText[i]).varBDD()), prev_operator);
+						res = bdd_apply(res, bdd_not(module->GetVariable(tokenText[i]).varBDD()), prev_operator);
 					}
 				}
 				case 4: {
@@ -404,8 +395,8 @@ private:
 				*/}
 				case 5: break;//throw Exception
 				default: {//variable name by default
-					if (module.check_ifVariableExist(tokenText[i])) {
-						res = bdd_apply(res, module.GetVariable(tokenText[i]).varBDD(), prev_operator);
+					if (module->check_ifVariableExist(tokenText[i])) {
+						res = bdd_apply(res, module->GetVariable(tokenText[i]).varBDD(), prev_operator);
 					} else {
 						//throw Exception!!!
 					}
@@ -445,9 +436,9 @@ public:
 		}
 		file.close();
 
-		delims.push_back(" "); delims.push_back("\t"); delims.push_back("\n"); delims.push_back("(");
-		delims.push_back(")"); delims.push_back("{"); delims.push_back("}"); delims.push_back("//");
-		delims.push_back("/*"); delims.push_back("*/"); delims.push_back(","); delims.push_back(";"); delims.push_back(".");
+		delims.push_back(" "); delims.push_back("\t"); delims.push_back("\n"); delims.push_back("("); delims.push_back(".");
+		delims.push_back(")"); delims.push_back("{"); delims.push_back("}"); delims.push_back("//"); delims.push_back("!");
+		delims.push_back("/*"); delims.push_back("*/"); delims.push_back(","); delims.push_back(";"); delims.push_back(":=");
 
 		tokenize();
 	}
@@ -494,21 +485,25 @@ public:
 				mainModuleExist = true;
 				if (tokenText[++i] != "VAR") mainModuleExist = false;//throw Exception!!!
 
-				std::map<std::string, SMVModule> modules;
+				std::map<std::string, SMVModule*> modules;
 
 				for (int j = i; tokenText[j] != "MODULE"; j++) {//read all modules names
+					if (tokenText[j] == "VAR") j++;
+
 					std::string module_temporary_name = tokenText[j];
 					if (tokenText[++j] != ":") mainModuleExist = false;//throw Exception!!!
 					std::string module_primary_name = tokenText[++j];
 
 					// ?? may be add the test if moduleName is good?
 					SMVModule newModule(module_primary_name);
-					modules[module_temporary_name] = newModule;
-					allModules.push_back(newModule);
+					modules[module_temporary_name] = &newModule;
+					allModules.push_back(&newModule);
 					while(tokenText[++j] != ";") {}
 				}
-				SMVModule currentModule, otherModule;
+				SMVModule* otherModule;
 				for (int j = i; tokenText[j] != "MODULE"; j++) {
+					if (tokenText[j] == "VAR") j++;
+
 					std::string module_temporary_name = tokenText[j];
 					++j;//tokenText[++j] == ":"
 					std::string module_primary_name = tokenText[++j];
@@ -516,11 +511,13 @@ public:
 					if (tokenText[++j] == "(") {
 						while(tokenText[j] != ")") {
 							std::string otherModuleName = tokenText[++j];// not needed for the first time.
-							otherModule = modules[module_temporary_name];
+							otherModule = modules[otherModuleName];
 							if (tokenText[++j] != ".") mainModuleExist = false;// throw Exception!!!
-							if (!otherModule.AddVariable(tokenText[++j])) mainModuleExist = false;// throw Exception!!!
 
-							GetModule(tokenText[j]).AddExternalVariable(otherModule.GetVariable(tokenText[j]));
+							std::string varName = tokenText[++j];
+							if (!otherModule->AddVariable(varName)) mainModuleExist = false;// throw Exception!!!
+
+							GetModule(module_primary_name)->AddExternalVariable(otherModule->GetVariable(varName));
 							if (tokenText[++j] == ",") continue;
 						}
 					}
@@ -528,10 +525,14 @@ public:
 				}
 			}
 		}
-		if (mainModuleExist) return;//throw Exception!!!
+		if (!mainModuleExist) return;//throw Exception!!!
 	}
 
 	void getSMVModules() {
+		bdd_init(10000000,1000000);//[TA] what to set here?
+		bdd_setcacheratio(10);
+		bdd_enable_reorder();
+
 		readMainSMVModule();// здесь читается, какие будут модули, создаются пустые модули-элементы класса, описываются переменные.
 
 		//!!!!!! 1st: getModuleVariables!
@@ -539,8 +540,8 @@ public:
 		for (unsigned i = 0; i < tokenText.size(); i++) {
 			if (tokenText[i] == "MODULE") {
 				for (unsigned j = 0; j < allModules.size(); j++) {
-					if (allModules[j].GetName() == tokenText[++i]) {
-						module = &allModules[j];
+					if (allModules[j]->GetName() == tokenText[++i]) {
+						module = allModules[j];
 					}
 				}// check if no module was found !!!
 
@@ -596,7 +597,7 @@ public:
 					case 0: { // read MODULE with requested name
 						//if (tmp.first == "") throw("NoSuchModuleException");//check how to throw exceptions!!!
 						if (tokenText[i++] == "MODULE") {
-							if (tokenText[i++] != allModules[m].GetName()) { break; }//throw Exception!!!
+							if (tokenText[i++] != allModules[m]->GetName()) { break; }//throw Exception!!!
 							if (tokenText[i] == "(") { state = 1; i++; break; }
 							state = 1;// ? think about it! зачем еще и здесь присваивать state=1? такие ситуации будут?
 						}
@@ -639,7 +640,7 @@ public:
 						std::string token = tokenText[++i];
 						if (statesMap[token] > 0) { state = statesMap[token]; break; }
 						std::pair<int, bdd> temp = getBDD(0, ";", allModules[m]);
-						allModules[m].SetTransition(temp.second);
+						allModules[m]->SetTransition(temp.second);
 					}
 					case 6: { // read MODULE justice requirements
 						std::string token = tokenText[++i];
@@ -654,6 +655,11 @@ public:
 	void printFile(std::ostream& stream) {
 		for (unsigned i = 0; i < text.size(); i++) {
 			stream << text[i];
+		}
+	}
+	void printFileTokens(std::ostream& stream) {
+		for (unsigned i = 0; i < tokenText.size(); i++) {
+			stream << tokenText[i] << " ";
 		}
 	}
 };// end class FileText
@@ -1326,8 +1332,8 @@ int printDot(std::ostream &out, bdd & bddtrans)
 
 int main(void)
 {
-	FileText file("arbiterTEST.smv");
-	
+	FileText file("arbiter2.smv");
+
 	file.removeExtraData();//remove all comments
 	//проверить: если создаем элемент класса, кладем его в массив, потом забираем обратно в новую переменную и меняем эту переменную - изменится ли значение того?
 	file.getSMVModules();
