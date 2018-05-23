@@ -164,6 +164,11 @@ public:
 		values = other.values;
 	}
 	// end constructors
+	/*~Variable() {
+		name.clear();
+		values.clear();
+	}*/
+
 	std::string Name() { return name; }
 	
 	int Id() { return id; }
@@ -214,6 +219,13 @@ public:
 		justice = other.justice;
 	}
 	// end constructors
+	/*~SMVModule() {
+		moduleName.clear();
+		vars.clear();
+		externalVars.clear();
+		justice.clear();
+    }*/
+
 	std::string GetName() { return moduleName; }
 
 	void SetName(std::string name) { moduleName = name; }
@@ -509,12 +521,12 @@ public:
 		tokenText = other.tokenText;
     }
 	
-	~FileText() {
+	/*~FileText() {
 		text.clear();
 		tokenText.clear();
 		delims.clear();
 		allModules.clear();
-    }
+    }*/
 	
 	void tokenize() {
 		tokenText.clear();
@@ -751,6 +763,7 @@ class GRGame {
 private:
 	SMVModule sys;
 	SMVModule env;
+	int ta_TEST;//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	std::vector<std::vector<std::vector<bdd>>> x_strat;//strategies for the system: leads the computation to J1-states
 	std::vector<std::vector<bdd>> y_strat;//strategy for the system: leads the computation to get closer to J2-states
 
@@ -767,7 +780,7 @@ private:
 		if (b) { //[TA] change this condition!!!
 			b = false;
 			std::vector<Variable> sys_vars = sys.GetInternalVariables();
-			std::vector<Variable> env_vars = sys.GetInternalVariables();
+			std::vector<Variable> env_vars = env.GetInternalVariables();
 			for (unsigned i = 0; i < sys_vars.size(); i++)
 				bdd_setpair(sysEnv_Pairs, sys_vars[i].Id(), sys_vars[i].NextId());
 			for (unsigned i = 0; i < env_vars.size(); i++)
@@ -811,15 +824,7 @@ private:
 
 	//[TA] check one more time!!!
 	bdd step(bdd phi) { // function is named cox in the article
-		bdd r1 = env.GetVariable("r1").varBDD();
-		bdd r1_ = env.GetVariable("r1").next();
-		bdd r2 = env.GetVariable("r2").varBDD();
-		bdd r2_ = env.GetVariable("r2").next();
-		bdd g1 = env.GetVariable("g1").varBDD();
-		bdd g2 = env.GetVariable("g2").varBDD();
-		bdd test1 = !r1 | !r2 | !g1 | !g2;
-		bdd test9 = phi;
-
+		ta_TEST++;//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 		std::vector<Variable> sys_vars = sys.GetInternalVariables();
 		static bdd sys_next_bdd = bddtruepp;//[TA] check: may be bddfalsepp
 		if (sys_next_bdd == bddtruepp) {//[TA] this condition is to initialise sys_pr_arr_bdd only once
@@ -830,12 +835,10 @@ private:
 			sys_next_bdd = bdd_makeset(sys_next_arr, sys_vars.size());
 		}
 		//p_e => \exist y' such that (p_s and phi(x',y'))
+
 		bdd res = bdd_imp(env.GetTransition(), bdd_exist(sys.GetTransition() & Next(phi), sys_next_bdd));
 
 		//\foreach x'
-		bdd TA_test = !env.GetTransition();
-		TA_test = (r1 & g1 | !r1 & !g1 | r1 & r1_ | !r1 & !r1_) & (r2 & g2 | !r2 & !g2 | r2 & r2_ | !r2 & !r2_);
-		TA_test = !TA_test;
 		std::vector<int> env_next_IDs = env.VariablesNextIds();
 		for (unsigned i = 0; i < env_next_IDs.size(); i++)
 			res = bdd_forall(res, bdd_ithvarpp(env_next_IDs[i]));
@@ -848,7 +851,6 @@ private:
 			x_old;
 		do {
 			x_old = x;
-			
 			x = !env.GetJustice()[i] & step(x) | start;
 		} while(x_old != x);
 		return x;
@@ -887,6 +889,7 @@ public:
 		sys = SMVModule(system);
 		y_strat.resize(sys.GetJustice().size());
 		x_strat.resize(sys.GetJustice().size());
+		ta_TEST = 0;
 	}
 
 	bdd WinningRegion() {
@@ -898,6 +901,7 @@ public:
 			for (unsigned j = 0; j < sys.GetJustice().size(); j++)
 				z = leastFixPoint(z, j);
 		} while(z != z_old);
+		std::cout<<"\n"<<ta_TEST<<"\n";
 		return z;
 	}// end WinningRegion
 
@@ -908,16 +912,27 @@ public:
 
 int main(void)
 {
-	FileText file("arbiter2.smv");
+	long t0 = clock();
+	FileText file("arbiter8.smv");
 
 	file.removeExtraData();//remove all comments
 	//проверить: если создаем элемент класса, кладем его в массив, потом забираем обратно в новую переменную и меняем эту переменную - изменится ли значение того?
 	file.readSMVModules();
 	SMVModule sys(file.GetModule("sys"));
 	SMVModule env(file.GetModule("env"));
-
-	GRGame arbiter2(sys, env);
+	
+	long t1 = clock();
+	GRGame arbiter2(env, sys);
+	
+	out_strat.open("new_winreg.txt");
 	bdd temp = arbiter2.WinningRegion();
+	
+	
+	out_strat<<temp<<std::endl;
+	out_strat.close();
+
+	std::cout << "Time0 : " << t1 - t0 << std::endl;
+	std::cout << "WinReg : " << clock() - t1 << std::endl;
 	/*
 	prevTime = clock();
 	long t1 = clock();
@@ -1206,4 +1221,14 @@ int printDot(std::ostream &out, bdd & bddtrans)
 	
 	return 1;
 }// end printDot
+*/
+
+
+	/*
+			bdd r1 = env.GetVariable("r1").varBDD();
+		bdd r1_ = env.GetVariable("r1").next();
+		bdd r2 = env.GetVariable("r2").varBDD();
+		bdd r2_ = env.GetVariable("r2").next();
+		bdd g1 = env.GetVariable("g1").varBDD();
+		bdd g2 = env.GetVariable("g2").varBDD();
 */
