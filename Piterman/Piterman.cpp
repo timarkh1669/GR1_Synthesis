@@ -1,9 +1,12 @@
 //check for [TA]
 //check for !!!
+//delete coxCnt
 // Piterman.cpp : controller synthesis as in Piterman2006 article
 #pragma comment(lib, "bdd.lib")	// BuDDy library
+//#include "stdafx.h"
 #include <vector>
 #include "bdd.h"
+
 #include <string>
 #include <set>
 #include <map>
@@ -25,63 +28,34 @@ std::vector<bdd>	J1,//vector of left-hand side (of the implication) boolean form
 
 //we code variables from X as {env1..env1+envCnt-1}: bdd_ithvarpp(env1), ..., bdd_ithvarpp(env1+envCnt-1) - these are environment variables
 //we code variables from Y as {sys1..sys1+sysCnt-1}: bdd_ithvarpp(sys1), ..., bdd_ithvarpp(sys1+sysCnt-1) - these are system variables
-unsigned env1,	//number of the first environment variable
-		sys1,	//number of the first system variable
-		env1_pr,//number of the first primed environment variable
-		sys1_pr,//number of the first primed system variable
-		envCnt,	//environment variables count
-		sysCnt,	//system variables count
-		//we code each jx (1..n) strategy in binary format using [log2(n)] binary variables:
-		jx1,	//number of the first binary variable of jx
-		jx1_pr,	//number of the first binary variable of primed jx
-		jxCnt,	//jx binary variables count: jxCnt = log2(n)
-		n;
-
-int *env_sys_jx_arr,
-	*primed_env_sys_jx_arr,
-	*jx_pr_arr;
 
 std::vector<std::string> varNames;
 
-class State
-{
+class State {
 private:
 	bdd bddState;
 	std::string name,	//unique and compact name for each state, e.g. s01101
 				title;	//[TA]!!!!!
+	unsigned env1, envCnt, sys1, sysCnt, jx1, jxCnt;
 	
 	bool initial;
 
 	void setName() {
+		unsigned varCnt = bdd_varnum();
 		name = "s";
-		for (unsigned i = env1; i < env1 + envCnt; i++)
-			name += ((bddState & bdd_ithvarpp(i)) != bddfalsepp) ? "1" : "0";
-		for (unsigned i = sys1; i < sys1 + sysCnt; i++)
-			name += ((bddState & bdd_ithvarpp(i)) != bddfalsepp) ? "1" : "0";
-		for (unsigned i = jx1; i < jx1 + jxCnt; i++)
+		for (unsigned i = 0; i < varCnt; i++)
 			name += ((bddState & bdd_ithvarpp(i)) != bddfalsepp) ? "1" : "0";
 	}
 	void setTitle() {
 		title = "";
 		
 		for (unsigned i = env1; i < env1 + envCnt; i++)
-			title += ithVarTitle(i) + ",";
+			title += "<O>" + varNames[i] + "</O>" + ",";
 		for (unsigned i = sys1; i < sys1 + sysCnt; i++)
-			title += ithVarTitle(i) + ",";
+			title += "<O>" + varNames[i] + "</O>" + ",";
 		
 		title += " ";
 		title += ithJxTitle();
-	}
-	std::string ithVarTitle(unsigned i) {
-		if (varNames.size() <= i) {//if environment and system variable names were not initialized
-			return (name.size() > i) ? ""+name[i] : "";
-		}
-
-		return ((bddState & bdd_ithvarpp(i)) != bddfalsepp) ?
-			varNames[i] :
-			((bddState & !bdd_ithvarpp(i)) != bddfalsepp) ?
-				"<O>" + varNames[i] + "</O>" :
-				"";
 	}
 	std::string ithJxTitle() {
 		int jx_ind = 0;
@@ -99,7 +73,8 @@ public:
 		setName();
 		setTitle();
 	}
-    State(bdd allVarsBDD, bool ifFrom) {
+    
+	State(bdd allVarsBDD, bool ifFrom) {
 		bddState = allVarsBDD;
 		if (ifFrom) {//we receive transition BDD, if we should take from-state, we delete all primed variables
 			bddState = bdd_exist(bddState, bdd_makeset(primed_env_sys_jx_arr, envCnt + sysCnt + jxCnt));
@@ -108,12 +83,7 @@ public:
 			bddState = bdd_exist(bddState, bdd_makeset(env_sys_jx_arr, envCnt + sysCnt + jxCnt));
 			
 			bddPair *pairs = bdd_newpair();
-			for (unsigned i = 0; i < envCnt; i++)
-				bdd_setpair(pairs, env1_pr + i, env1 + i);
-			for (unsigned i = 0; i < sysCnt; i++)
-				bdd_setpair(pairs, sys1_pr + i, sys1 + i);
-			for (unsigned i = 0; i < jxCnt; i++)
-				bdd_setpair(pairs, jx1_pr + i, jx1 + i);
+			// !!!!!!!!!! unprime all variables!!!!!!!!! Надо из next сделать просто переменные, причем для jx - тоже
 			bddState = bdd_replace(bddState, pairs);
 		}
 		
@@ -121,6 +91,11 @@ public:
 		setTitle();
 		initial = ((init & bddState) != bddfalsepp) ? true : false;
     }
+	
+	~State() {
+		name.clear();
+		title.clear();
+	}
 	std::string getName() { return name; }
 
 	std::string getTitle() { return title; }
@@ -131,8 +106,10 @@ public:
 class Variable {
 private:
 	std::string name;
-	std::vector<std::string> values;
-	int id;
+	std::map<std::string, bdd> valuesBDD;
+	std::map<std::string, bdd> nextValuesBDD;
+	unsigned varBDDCnt;
+	int id0;
 
 	unsigned log2(int k) {
 		unsigned log = 0;
@@ -140,52 +117,88 @@ private:
 		return log;
 	}// end log2
 
+	bdd bdd_ithfun(int f_num, int fromVar, unsigned varCnt) {
+		//if fromVar == jx1:	jx1 , jx2 , jx3 , ...
+		//if fromVar == jx1_:	jx1', jx2', jx3', ...
+		bdd fun = bddtruepp;
+		for (unsigned i = 0; i < varCnt; i++)
+			fun &= ((f_num >> i) & 1) ? bdd_ithvarpp(i + fromVar) : bdd_nithvarpp(i + fromVar);
+		return fun;
+	}// end bdd_ithfun
+
 public:
 	//constructors:
+	Variable() {}
+
 	Variable(std::string name_str) {
 		name = name_str;
-		id = bdd_varnum();
-		values.push_back("TRUE");values.push_back("FALSE");
+		id0 = bdd_varnum();
+		varBDDCnt = 1;
 		bdd_extvarnum(2); // because we use second var to encode next(var)
+		valuesBDD["TRUE"] = bdd_ithvar(id0);
+		valuesBDD["FALSE"] = bdd_nithvar(id0);
 	}
-	Variable(std::string var_name, int var_id) {//if we just want to create a copy of variable
-		name = var_name;
-		id = var_id;
-	}
+
 	Variable(std::string name_str, std::vector<std::string> var_values) {
 		name = name_str;
-		id = bdd_varnum();//??!!!
-		values = var_values;
-		bdd_extvarnum(log2(var_values.size()) * 2);// because we use second vars set to encode next(var)
+		id0 = bdd_varnum();//[TA] may be we don't need this?
+		varBDDCnt = log2(var_values.size());
+		bdd_extvarnum(varBDDCnt * 2);// because we use second vars set to encode next(var)
+
+		for (unsigned i = 0; i < varBDDCnt; i++) {
+			valuesBDD[var_values[i]] = bdd_ithfun(i, id0, varBDDCnt);
+			nextValuesBDD[var_values[i]] = bdd_ithfun(i, id0 + varBDDCnt, varBDDCnt);
+		}	
 	}
+	
 	Variable(const Variable& other) {
 		name = other.name;
-		id = other.id;
-		values = other.values;
+		id0 = other.id0;
+		valuesBDD = other.valuesBDD;
+		nextValuesBDD = other.nextValuesBDD;
+		varBDDCnt = other.varBDDCnt;
 	}
 	// end constructors
-	/*~Variable() {
+	~Variable() {
 		name.clear();
-		values.clear();
-	}*/
+		valuesBDD.clear();
+	}
 
 	std::string Name() { return name; }
 	
-	int Id() { return id; }
-	
-	int NextId() { return id + 1; }
-	
-	bdd varBDD() { return bdd_ithvar(id); }
-	
-	bdd varValueBDD(std::string value) {
-		//!!!change if several values!!!
-		if (value == "TRUE") return varBDD();
-		if (value == "FALSE") return bdd_not(varBDD());
-		//else
-		return bddfalsepp;
+	int Id() { return id0; }
+
+	int* IDs() {//we use array of int because we can also use enumerable variables
+		int *res = new int[varBDDCnt];
+		for (unsigned i = 0; i < varBDDCnt; i++)
+			res[i] = id0 + i;
+
+		return res;
 	}
 	
-	bdd next() { return bdd_ithvar(NextId()); }// возможно, удалить этот метод
+	int NextId() { return id0 + 1; }
+	
+	int* NextIDs() {
+		int *res = new int[varBDDCnt];
+		for (unsigned i = 0; i < varBDDCnt; i++)
+			res[i] = id0 + varBDDCnt + i;
+
+		return res;
+	}
+	
+	bdd varBDD() { return bdd_ithvar(id0); }
+
+	unsigned GetVarBDDCnt() { return varBDDCnt; }
+
+	bdd varValueBDD(std::string value) {
+		return (valuesBDD.find(value) == valuesBDD.end()) ? bddfalsepp : valuesBDD[value];
+	}
+	
+	bdd nextBDD() { return bdd_ithvar(NextId()); }
+
+	bdd nextVarValueBDD(std::string value) {
+		return (nextValuesBDD.find(value) == nextValuesBDD.end()) ? bddfalsepp : nextValuesBDD[value];
+	}
 };
 
 class SMVModule {
@@ -219,12 +232,12 @@ public:
 		justice = other.justice;
 	}
 	// end constructors
-	/*~SMVModule() {
+	~SMVModule() {
 		moduleName.clear();
 		vars.clear();
 		externalVars.clear();
 		justice.clear();
-    }*/
+    }
 
 	std::string GetName() { return moduleName; }
 
@@ -237,7 +250,7 @@ public:
 	void AddInitial(bdd ini) { initial = initial & ini; }
 
 	void AddInitial(std::string varName, std::string val_ini) {
-		Variable v = GetVariable(varName);
+		Variable v(GetVariable(varName));
 		initial = initial & v.varValueBDD(val_ini);
 	}
 	
@@ -268,7 +281,7 @@ public:
 		return res;
 	}
 
-	std::vector<int> VariablesIds() { 
+	std::vector<int> VariablesIds() { //[TA] may be don't need this
 		std::vector<int> res;
 
 		for (unsigned i = 0; i < vars.size(); i++) {
@@ -277,7 +290,7 @@ public:
 		return res;
 	}// change to static definition!!!
 
-	std::vector<int> VariablesNextIds() { 
+	std::vector<int> VariablesNextIds() { //[TA] may be don't need this
 		std::vector<int> res;
 
 		for (unsigned i = 0; i < vars.size(); i++) {
@@ -286,7 +299,7 @@ public:
 		return res;
 	}// change to static definition!!!
 
-	std::vector<int> AllVariablesIds() { 
+	std::vector<int> AllVariablesIds() { //[TA] may be don't need this
 		std::vector<int> res;
 
 		for (unsigned i = 0; i < vars.size(); i++) {
@@ -298,7 +311,7 @@ public:
 		return res;
 	}// change to static definition!!!
 
-	std::vector<int> AllVariablesNextIds() { 
+	std::vector<int> AllVariablesNextIds() { //[TA] may be don't need this
 		std::vector<int> res;
 
 		for (unsigned i = 0; i < vars.size(); i++) {
@@ -333,22 +346,6 @@ public:
 	}
 
 	std::vector<bdd> GetJustice() { return justice; }
-
-	bdd primeModuleVariables(bdd func) {
-		static bddPair *modulePrimePairs = bdd_newpair();
-		// !!!!!!!!!!!!!!!!!!!!!!! prime variables
-		static bool b = true;
-		if (b) { //[TA] change this condition!!!
-			b = false;
-
-			for (unsigned i = 0; i < vars.size(); i++)
-				bdd_setpair(modulePrimePairs, vars[i].Id(), vars[i].NextId());
-			for (unsigned i = 0; i < externalVars.size(); i++)
-				bdd_setpair(modulePrimePairs, externalVars[i].Id(), externalVars[i].NextId());
-		}
-
-		return bdd_replace(func, modulePrimePairs);
-	}// end primeModuleVariables
 };//end class SMVModule
 
 class FileText {
@@ -385,11 +382,11 @@ private:
 		}
 	}
 
-	/* !!!!!!!!!!!!!!!!!!!!!!! prime variables*/bdd next(bdd func) {
+	bdd next(bdd func) {
 		static bddPair *sysEnv_primePair = bdd_newpair();
 		
 		static bool b = true;
-		bdd res = bddtruepp;//[TA] temp!!!!
+
 		if (b) { //[TA] change this condition!!!
 			b = false;
 			for (unsigned i = 0; i < allModules.size(); i++) {
@@ -423,7 +420,6 @@ private:
 			operatorsMap["|"] = bddop_or;
 			operatorsMap["->"] = bddop_imp;
 			operatorsMap["="] = bddop_biimp;
-			operatorsMap["!="] = bddop_xor; // ???!!!
 
 		std::map<std::string, int> statesMap;
 			statesMap["("] = 1;
@@ -459,8 +455,8 @@ private:
 					std::string varName = tokenText[++i];
 
 					Variable var = module->GetVariable(varName);
-					if (tokenText[++i] != ")") break; // throw Exception!!!
-					res = bdd_apply(res, var.next(), prev_operator);
+					if (tokenText[++i] != ")") break; // throw Exception! NO!!! here can be "= value" code.
+					res = bdd_apply(res, var.nextBDD(), prev_operator);
 					break;
 				}
 				case 5: break;//throw Exception
@@ -763,7 +759,8 @@ class GRGame {
 private:
 	SMVModule sys;
 	SMVModule env;
-	int ta_TEST;//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	Variable jx;
+	int coxCnt;
 	std::vector<std::vector<std::vector<bdd>>> x_strat;//strategies for the system: leads the computation to J1-states
 	std::vector<std::vector<bdd>> y_strat;//strategy for the system: leads the computation to get closer to J2-states
 
@@ -779,18 +776,20 @@ private:
 
 		if (b) { //[TA] change this condition!!!
 			b = false;
+
 			std::vector<Variable> sys_vars = sys.GetInternalVariables();
 			std::vector<Variable> env_vars = env.GetInternalVariables();
+
 			for (unsigned i = 0; i < sys_vars.size(); i++)
-				bdd_setpair(sysEnv_Pairs, sys_vars[i].Id(), sys_vars[i].NextId());
+				bdd_setpairs(sysEnv_Pairs, sys_vars[i].IDs(), sys_vars[i].NextIDs(), 1);//!!! сделать не 1, а количество в общем случае
 			for (unsigned i = 0; i < env_vars.size(); i++)
-				bdd_setpair(sysEnv_Pairs, env_vars[i].Id(), env_vars[i].NextId());
+				bdd_setpairs(sysEnv_Pairs, env_vars[i].IDs(), env_vars[i].NextIDs(), 1);//!!! сделать не 1, а количество в общем случае
 		}
 
 		return bdd_replace(vars, sysEnv_Pairs);
 	}// end Next
 
-	bdd primeAllVariables(bdd vars) {
+	bdd primeAllVariables(bdd vars) {// берется next еще и у переменных jx
 		static bddPair *allVars_Pairs = bdd_newpair();
 
 		static bool b = true;
@@ -798,12 +797,12 @@ private:
 			b = false;
 
 			std::vector<Variable> sys_vars = sys.GetInternalVariables();
-			std::vector<Variable> env_vars = sys.GetInternalVariables();
+			std::vector<Variable> env_vars = env.GetInternalVariables();
 
 			for (unsigned i = 0; i < sys_vars.size(); i++)
-				bdd_setpair(allVars_Pairs, sys_vars[i].Id(), sys_vars[i].NextId());
+				bdd_setpairs(allVars_Pairs, sys_vars[i].IDs(), sys_vars[i].NextIDs(), 1);//!!! сделать не 1, а количество в общем случае
 			for (unsigned i = 0; i < env_vars.size(); i++)
-				bdd_setpair(allVars_Pairs, env_vars[i].Id(), env_vars[i].NextId());
+				bdd_setpairs(allVars_Pairs, env_vars[i].IDs(), env_vars[i].NextIDs(), 1);//!!! сделать не 1, а количество в общем случае
 //			for (unsigned i = 0; i < jxCnt; i++)
 //				bdd_setpair(allVars_primePair, jx1 + i, jx1_pr + i);!!!!!!!!!!!!!!!!! change!
 		}
@@ -824,15 +823,26 @@ private:
 
 	//[TA] check one more time!!!
 	bdd step(bdd phi) { // function is named cox in the article
-		ta_TEST++;//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		coxCnt++;
 		std::vector<Variable> sys_vars = sys.GetInternalVariables();
+
 		static bdd sys_next_bdd = bddtruepp;//[TA] check: may be bddfalsepp
 		if (sys_next_bdd == bddtruepp) {//[TA] this condition is to initialise sys_pr_arr_bdd only once
-			int* sys_next_arr = new int[sysCnt];
-			for (unsigned i = 0; i < sys_vars.size(); i++)
-				sys_next_arr[i] = sys_vars[i].NextId();
+			int sys_allVarBDDcnt = 0;
+			for (unsigned i = 0; i < sys_vars.size(); i++) {
+				sys_allVarBDDcnt += sys_vars[i].GetVarBDDCnt();
+			}
+			int* sys_next_arr = new int[sys_allVarBDDcnt];
+			
+			for (unsigned i = 0; i < sys_vars.size(); i++) {
+				int* nextIDs_i = sys_vars[i].NextIDs();
+				for (unsigned j = 0; j < sys_vars[i].GetVarBDDCnt(); j++) {
+					sys_next_arr[i] = nextIDs_i[j];
+				}
+			}
 
 			sys_next_bdd = bdd_makeset(sys_next_arr, sys_vars.size());
+//			delete[] sys_next_arr;
 		}
 		//p_e => \exist y' such that (p_s and phi(x',y'))
 
@@ -883,15 +893,55 @@ private:
 		return y;
 	}// end leastFixPoint
 
+	//[TA] may be we don't need this later..
+	bdd bdd_ithfun(int f_num, int fromVar, unsigned varCnt) {
+		//if fromVar == jx1:	jx1 , jx2 , jx3 , ...
+		//if fromVar == jx1_:	jx1', jx2', jx3', ...
+		bdd fun = bddtruepp;
+		for (unsigned i = 0; i < varCnt; i++)
+			fun &= ((f_num >> i) & 1) ? bdd_ithvarpp(i + fromVar) : bdd_nithvarpp(i + fromVar);
+		return fun;
+	}// end bdd_ithfun
+
+	int *env_sys_jx_arr, *primed_env_sys_jx_arr, *jx_pr_arr;
+
+	/*bdd forsome_V(bdd fun) {
+		//exist v' from V: env_pr, sys_pr or jx_pr
+		return bdd_exist(fun, bdd_makeset(env_sys_jx_arr, envCnt + sysCnt + jxCnt));
+	}// end forsome_V
+
+	bdd forsome_next_V(bdd fun) {
+		//exist v' from V: env_pr, sys_pr or jx_pr
+		bdd nextV_BDDset = bdd_makeset(primed_env_sys_jx_arr, envCnt + sysCnt + jxCnt);
+		return bdd_exist(fun, );
+	}// end forsome_next_V
+
+	bdd forsome_next_jx(bdd fun) {
+		//exist some primed jx
+		return bdd_exist(fun, bdd_makeset(jx_pr_arr, jxCnt));
+	}// end forsome_next_jx*/
+
+	void reduce(int j, int k) {
+		bdd states = forsome_next_V(trans & obseq & fromjx[j] & tojx[k]);
+		bdd add_trans = forsome_next_jx(trans & primeAllVariables(states)) & tojx[k];
+		bdd add_init = forsome_next_jx(init & states) & fromjx[k];
+		trans = (trans & !(primeAllVariables(states) | states)) | add_trans;
+		init = (init & !(states & fromjx[j])) | add_init;
+	}// end reduce
 public:
 	GRGame(SMVModule environment, SMVModule system) {
 		env = SMVModule(environment);
 		sys = SMVModule(system);
 		y_strat.resize(sys.GetJustice().size());
 		x_strat.resize(sys.GetJustice().size());
-		ta_TEST = 0;
+		coxCnt = 0;
 	}
-
+	
+	~GRGame() {
+		x_strat.clear();
+		y_strat.clear();
+	}
+	
 	bdd WinningRegion() {
 		bdd z = bddtruepp,
 			z_old;
@@ -901,32 +951,90 @@ public:
 			for (unsigned j = 0; j < sys.GetJustice().size(); j++)
 				z = leastFixPoint(z, j);
 		} while(z != z_old);
-		std::cout<<"\n"<<ta_TEST<<"\n";
+		std::cout<<"\n"<<coxCnt<<"\n";
 		return z;
 	}// end WinningRegion
 
-	void Synthesise() {}
-	void Minimize() {}
+	bdd getConroller(bdd z) {
+		bdd trans = bddfalse;
+
+		unsigned sysJ_cnt = sys.GetJustice().size();
+		unsigned jx1 = bdd_varnum();//jx1 position
+		//потом перенести добавление переменных jx в инициализацию и проверить, изменилось ли время.
+
+		std::vector<std::string> from0toN;
+		for (int i = 0; i < sysJ_cnt; i++)
+			from0toN.push_back(""+i);
+		jx = Variable(" jx", from0toN);//I give such name (" jx") because it can not be assigned for the other variables (parser doesn't allow to create the names like this).
+
+		for (unsigned i = 0; i < sysJ_cnt; i++) {
+			fromjx[i] = jx.varValueBDD(from0toN[i]);
+			tojx[i] = jx.nextVarValueBDD(from0toN[i]);
+		}
+
+		unsigned envJ_cnt = env.GetJustice().size();
+
+		for (unsigned j = 0; j < envJ_cnt; j++) {
+			trans |= fromjx[j] & tojx[(j + 1) % sysJ_cnt] & z & sys.GetJustice()[j] & env.GetTransition() & sys.GetTransition() & Next(z);
+		}
+		for (unsigned j = 0; j < sysJ_cnt; j++) {
+			bdd low = y_strat[j][0];
+			for (unsigned r = 1; r < y_strat[j].size(); r++) {//maxr[j] == y_strat[j].size()
+				trans |= fromjx[j] & tojx[j] & y_strat[j][r] & !low & env.GetTransition() & sys.GetTransition() & Next(low);
+				low |= y_strat[j][r];
+			}
+		}
+		for (unsigned j = 0; j < sysJ_cnt; j++) {
+			bdd low = bddfalse;
+			for (unsigned r = 0; r < y_strat[j].size(); r++) {//maxr[j] == y_strat[j].size()
+				for (unsigned i = 0; i < envJ_cnt; i++) {
+					trans |= fromjx[j] & tojx[j] & x_strat[j][r][i] & !low & !env.GetJustice()[i] & env.GetTransition() & sys.GetTransition() & Next(x_strat[j][r][i]);
+					low |= x_strat[j][r][i];
+				}
+			}
+		}
+		return trans;
+	}// end getConroller
+
+	bdd Minimize(bdd trans) {
+		obseq = bddtrue;//obseq variable: describes transitions where only jx strategy changes
+		for (unsigned i = 0; i < n; i++)
+			obseq &= ! (fromjx[i] & tojx[i]);
+		//and other variables doesn't change
+		for (unsigned i = 0; i < envCnt; i++)
+			obseq &= bdd_biimp(bdd_ithvarpp(env1 + i), bdd_ithvarpp(env1_pr + i));
+		for (unsigned i = 0; i < sysCnt; i++)
+			obseq &= bdd_biimp(bdd_ithvarpp(sys1 + i), bdd_ithvarpp(sys1_pr + i));
+
+		//n == jxCnt
+		std::ofstream out;
+		for (unsigned j = 0; j < n; j++)
+			reduce(j, (j + 1) % n);
+		for (unsigned j = 0; j < n - 1; j++)
+			reduce(n - 1, j);
+		}
+	}
 };// end class GRGame
 
 
 int main(void)
 {
 	long t0 = clock();
-	FileText file("arbiter8.smv");
+	FileText file("arbiter9.smv");
 
 	file.removeExtraData();//remove all comments
-	//проверить: если создаем элемент класса, кладем его в массив, потом забираем обратно в новую переменную и меняем эту переменную - изменится ли значение того?
+	int test = bdd_varnum();
 	file.readSMVModules();
+	test = bdd_varnum();
 	SMVModule sys(file.GetModule("sys"));
 	SMVModule env(file.GetModule("env"));
-	
+	test = bdd_varnum();
 	long t1 = clock();
 	GRGame arbiter2(env, sys);
-	
+	test = bdd_varnum();
 	out_strat.open("new_winreg.txt");
 	bdd temp = arbiter2.WinningRegion();
-	
+	test = bdd_varnum();
 	
 	out_strat<<temp<<std::endl;
 	out_strat.close();
@@ -996,93 +1104,11 @@ int main(void)
 //				OLD FUNCTIONS, PUT THEM TO GRGame class
 //================================================================
 /*
-bdd bdd_ithfun(int f_num, int fromVar, unsigned varCnt) {
-	//we code jx  variables as [sysCnt+envCnt			...		sysCnt+envCnt+ log2(n)-1]
-	//we code jx_ variables as [sysCnt+envCnt+log2(n)	...		sysCnt+envCnt+2log2(n)-1]
-	//if fromVar == jx1:	jx1 , jx2 , jx3 , ...
-	//if fromVar == jx1_:	jx1', jx2', jx3', ...
-	bdd fun = bddtruepp;
-	for (unsigned i = 0; i < varCnt; i++)
-		fun &= ((f_num >> i) & 1) ? bdd_ithvarpp(i + fromVar) : bdd_nithvarpp(i + fromVar);
-	return fun;
-}// end bdd_ithfun
 
 bdd bdd_nithfun(int f_num, int from, int varCnt) {
 	return bdd_ithfun(~f_num, from, varCnt);
 }// end bdd_nithfunFromVar
 
-void set_env_sys_jx_arr() {
-	env_sys_jx_arr = new int[envCnt + sysCnt + jxCnt];
-	
-	for (unsigned i = 0; i < envCnt; i++)
-		env_sys_jx_arr[i] = env1 + i;
-	for (unsigned i = 0; i < sysCnt; i++)
-		env_sys_jx_arr[envCnt + i] = sys1 + i;
-	for (unsigned i = 0; i < jxCnt; i++)
-		env_sys_jx_arr[envCnt + sysCnt + i] = jx1 + i;
-}// end set_env_sys_jx_arr
-
-void set_primed_env_sys_jx_arr() {
-	primed_env_sys_jx_arr = new int[envCnt + sysCnt + jxCnt];
-	
-	for (unsigned i = 0; i < envCnt; i++)
-		primed_env_sys_jx_arr[i] = env1_pr + i;
-	for (unsigned i = 0; i < sysCnt; i++)
-		primed_env_sys_jx_arr[envCnt + i] = sys1_pr + i;
-	for (unsigned i = 0; i < jxCnt; i++)
-		primed_env_sys_jx_arr[envCnt + sysCnt + i] = jx1_pr + i;
-}// end set_primed_env_sys_jx_arr
-
-void set_jx_pr_arr() {
-	jx_pr_arr = new int[jxCnt];
-	for (unsigned i = 0; i < jxCnt; i++)
-		jx_pr_arr[i] = jx1_pr + i;
-}// end set_jx_pr_arr
-
-bdd toSymbStrategy(bdd z) {
-	bdd trans = bddfalse;
-
-	n = J2.size();
-	jxCnt = log2(n);
-	jx1 = bdd_varnum();//jx1 position
-	jx1_pr = jx1 + jxCnt;//jx1' position
-
-	set_env_sys_jx_arr();
-	set_primed_env_sys_jx_arr();
-	set_jx_pr_arr();
-
-	unsigned m = J1.size();
-
-	bdd_extvarnum(jxCnt * 2);//we extend variables count in order to use jx and jx'(jx_) variables additionally
-	//set jx Codes
-	fromjx.resize(n);
-	tojx.resize(n);
-	
-	for (unsigned i = 0; i < n; i++) {
-		fromjx[i] = bdd_ithfun(i, jx1, log2(n));
-		tojx[i] = bdd_ithfun(i, jx1_pr, log2(n));
-	}
-	for (unsigned j = 0; j < n; j++) {
-		trans |= fromjx[j] & tojx[(j + 1) % n] & z & J2[j] & p_e & p_s & primeVariables_SysEnv(z);
-	}
-	for (unsigned j = 0; j < n; j++) {
-		bdd low = y_strat[j][0];
-		for (unsigned r = 1; r < y_strat[j].size(); r++) {//maxr[j] == y_strat[j].size()
-			trans |= fromjx[j] & tojx[j] & y_strat[j][r] & !low & p_e & p_s & primeVariables_SysEnv(low);
-			low |= y_strat[j][r];
-		}
-	}
-	for (unsigned j = 0; j < n; j++) {
-		bdd low = bddfalse;
-		for (unsigned r = 0; r < y_strat[j].size(); r++) {//maxr[j] == y_strat[j].size()
-			for (unsigned i = 0; i < m; i++) {
-				trans |= fromjx[j] & tojx[j] & x_strat[j][r][i] & !low & !J1[i] & p_e & p_s & primeVariables_SysEnv(x_strat[j][r][i]);
-				low |= x_strat[j][r][i];
-			}
-		}
-	}
-	return trans;
-}// end toSymbStrategy
 
 bdd forsome_V(bdd fun) {
 	//exist v' from V: env_pr, sys_pr or jx_pr
@@ -1184,8 +1210,7 @@ bdd allReachableTrans(bdd & bddTrans) {
 	return res;
 }// end allReachableTrans
 
-int printDot(std::ostream &out, bdd & bddtrans)
-{
+int printDot(std::ostream &out, bdd & bddtrans) {
 	bdd nonPrinted_trans = allReachableTrans(bddtrans);
 	bdd trans_curr_bdd;
 	
