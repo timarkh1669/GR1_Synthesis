@@ -1,12 +1,12 @@
+// Piterman.cpp : controller synthesis for GR(1) requirements
 //check for [TA]
 //check for !!!
-//delete coxCnt
-// Piterman.cpp : controller synthesis as in Piterman2006 article
-#pragma comment(lib, "bdd.lib")	// BuDDy library
-//#include "stdafx.h"
-#include <vector>
+//change "static"
+
+#pragma comment(lib, "Debug/bdd.lib")	// BuDDy library
 #include "bdd.h"
 
+#include <vector>
 #include <string>
 #include <set>
 #include <map>
@@ -15,6 +15,7 @@
 #include <sstream>
 #include <time.h>
 
+int cox_cnt;
 struct State {
 	std::string name;
 	std::string title;
@@ -29,15 +30,17 @@ private:
 	unsigned varBDDCnt;// count of BDD variables used to encode this Variable
 	int id0;
 
-	unsigned log2(int k) {
+	unsigned log2(int val) {
+		if (val == 0) return UINT_MAX;
 		unsigned log = 0;
-		while (k >>= 1) log++;
+		while (val > 1) {
+			val = val / 2 + val % 2;
+			log++;
+		}
 		return log;
 	}// end log2
 
 	bdd bdd_ithfun(int f_num, int fromVar, unsigned varCnt) {
-		//if fromVar == jx1:	jx1 , jx2 , jx3 , ...
-		//if fromVar == jx1_:	jx1', jx2', jx3', ...
 		bdd fun = bddtruepp;
 		for (unsigned i = 0; i < varCnt; i++)
 			fun &= ((f_num >> i) & 1) ? bdd_ithvarpp(i + fromVar) : bdd_nithvarpp(i + fromVar);
@@ -48,18 +51,25 @@ public:
 	//constructors:
 	Variable() {}
 
-	Variable(std::string name_str) {
+	/*Variable(std::string name_str) {
 		name = name_str;
 		id0 = bdd_varnum();
 		varBDDCnt = 1;
 		bdd_extvarnum(2); // because we use second var to encode next(var)
 		valuesBDD["TRUE"] = bdd_ithvar(id0);
 		valuesBDD["FALSE"] = bdd_nithvar(id0);
+		nextValuesBDD["TRUE"] = bdd_ithvar(id0 + varBDDCnt);
+		nextValuesBDD["FALSE"] = bdd_nithvar(id0 + varBDDCnt);
+	}*/
+	Variable(std::string name_str) {
+		name = name_str;
+		id0 = -1;
+		varBDDCnt = 0;
 	}
 
 	Variable(std::string name_str, std::vector<std::string> var_values) {
 		name = name_str;
-		id0 = bdd_varnum();//[TA] may be we don't need this?
+		id0 = bdd_varnum();
 		varBDDCnt = log2(var_values.size());
 		bdd_extvarnum(varBDDCnt * 2);// because we use second vars set to encode next(var)
 
@@ -71,14 +81,14 @@ public:
 	
 	Variable(std::string name_str, std::vector<int> var_values) {
 		name = name_str;
-		id0 = bdd_varnum();//[TA] may be we don't need this?
+		id0 = bdd_varnum();
 		varBDDCnt = log2(var_values.size());
 		bdd_extvarnum(varBDDCnt * 2);// because we use second vars set to encode next(var)
 
 		for (unsigned i = 0; i < var_values.size(); i++) {
 			valuesBDD[std::to_string(var_values[i])] = bdd_ithfun(i, id0, varBDDCnt);
 			nextValuesBDD[std::to_string(var_values[i])] = bdd_ithfun(i, id0 + varBDDCnt, varBDDCnt);
-		}	
+		}
 	}
 
 	Variable(const Variable& other) {
@@ -107,7 +117,17 @@ public:
 
 	std::string Name() { return name; }
 
-	int Id() { return id0; }
+	bool SetValues(std::vector<int> var_values) {
+		if (varBDDCnt > 0) return false;//if we set values earlier
+		id0 = bdd_varnum();
+		varBDDCnt = log2(var_values.size());
+		bdd_extvarnum(varBDDCnt * 2);// because we use second vars set to encode next(var)
+
+		for (unsigned i = 0; i < var_values.size(); i++) {
+			valuesBDD[std::to_string(var_values[i])] = bdd_ithfun(i, id0, varBDDCnt);
+			nextValuesBDD[std::to_string(var_values[i])] = bdd_ithfun(i, id0 + varBDDCnt, varBDDCnt);
+		}
+	}
 
 	int* IDs() {//all BDD variables IDs used to encode this Variable
 		int *res = new int[varBDDCnt];
@@ -117,8 +137,6 @@ public:
 		return res;
 	}
 
-	int NextId() { return id0 + 1; }
-
 	int* NextIDs() {//all BDD variables IDs used to encode Next(Variable) (next <=> primed)
 		int *res = new int[varBDDCnt];
 		for (unsigned i = 0; i < varBDDCnt; i++)
@@ -126,8 +144,6 @@ public:
 
 		return res;
 	}
-
-	bdd varBDD() { return bdd_ithvar(id0); }
 
 	unsigned GetVarBDDCnt() { return varBDDCnt; }
 
@@ -138,8 +154,6 @@ public:
 	bdd varValueBDD(int value) {
 		return (valuesBDD.find(std::to_string(value)) == valuesBDD.end()) ? bddfalsepp : valuesBDD[std::to_string(value)];
 	}
-
-	bdd nextBDD() { return bdd_ithvar(NextId()); }
 
 	bdd nextVarValueBDD(std::string value) {
 		return (nextValuesBDD.find(value) == nextValuesBDD.end()) ? bddfalsepp : nextValuesBDD[value];
@@ -161,6 +175,14 @@ public:
 		//else
 		return "";
 	}
+
+	bdd GetEqualNextBDD() {// get BDD: var = next(var)
+		bdd res = bddtruepp;
+		for (unsigned i = 0; i < varBDDCnt; i++)
+			res &= bdd_apply(bdd_ithvar(id0 + i), bdd_ithvar(id0 + varBDDCnt + i), bddop_biimp);
+
+		return res;
+	}
 };
 
 class SMVModule {
@@ -168,6 +190,8 @@ private:
 	std::string moduleName;
 	std::vector<Variable> vars;
 	std::vector<Variable> externalVars;
+	std::vector<int> vars_IDs;
+	std::vector<int> vars_NextIDs;
 
 	bdd initial;
 	bdd transition;
@@ -259,52 +283,38 @@ public:
 	}
 
 	std::vector<int> GetVariablesIds() {
-		std::vector<int> res;
-		for (unsigned i = 0; i < vars.size(); i++)
-			for (unsigned j = 0; j < vars[i].GetVarBDDCnt(); j++)
-				res.push_back(vars[i].IDs()[j]);
+		if (vars_IDs.size() == 0) {
+			for (unsigned i = 0; i < vars.size(); i++)
+				for (unsigned j = 0; j < vars[i].GetVarBDDCnt(); j++)
+					vars_IDs.push_back(vars[i].IDs()[j]);
+		}
 
-		return res;
-	}// change to static definition!!!
+		return vars_IDs;
+	}
 
 	std::vector<int> GetVariablesNextIds() {
-		std::vector<int> res;
-		for (unsigned i = 0; i < vars.size(); i++)
-			for (unsigned j = 0; j < vars[i].GetVarBDDCnt(); j++)
-				res.push_back(vars[i].NextIDs()[j]);
-
-		return res;
-	}// change to static definition!!!
-
-	std::vector<int> AllVariablesIds() { //[TA] may be don't need this
-		std::vector<int> res;
-
-		for (unsigned i = 0; i < vars.size(); i++) {
-			res.push_back(vars[i].Id());
+		if (vars_NextIDs.size() == 0) {
+			for (unsigned i = 0; i < vars.size(); i++)
+				for (unsigned j = 0; j < vars[i].GetVarBDDCnt(); j++)
+					vars_NextIDs.push_back(vars[i].NextIDs()[j]);
 		}
-		for (unsigned i = 0; i < externalVars.size(); i++) {
-			res.push_back(externalVars[i].Id());
-		}
-		return res;
-	}// change to static definition!!!
 
-	std::vector<int> AllVariablesNextIds() { //[TA] may be don't need this
-		std::vector<int> res;
-
-		for (unsigned i = 0; i < vars.size(); i++) {
-			res.push_back(vars[i].NextId());
-		}
-		for (unsigned i = 0; i < externalVars.size(); i++) {
-			res.push_back(externalVars[i].NextId());
-		}
-		return res;
-	}// change to static definition!!!
+		return vars_NextIDs;
+	}
 	
 	bool AddVariable(std::string varName) {
 		for (unsigned i = 0; i < vars.size(); i++)
 			if (varName == vars[i].Name()) return false;
 
 		vars.push_back(Variable (varName));
+		return true;
+	}
+
+	bool AddVariable(Variable var) {
+		for (unsigned i = 0; i < vars.size(); i++)
+			if (var.Name() == vars[i].Name()) return false;
+
+		vars.push_back(var);
 		return true;
 	}
 
@@ -358,7 +368,19 @@ private:
 			return std::make_pair(part1, str.erase(0, pos.first));
 		}
 	}
-
+	
+	void tokenize() {
+		tokenText.clear();
+		std::pair<std::string, std::string> token;
+		for (unsigned i = 0; i < text.size(); i++) {
+			token = getToken(text[i]);
+			while(token.first != "") {
+				tokenText.push_back(token.first);
+				token = getToken(token.second);
+			}
+		}
+	}
+	
 	SMVModule* FindModule(std::string moduleName) {
 		for (unsigned i = 0; i < allModules.size(); i++)
 			if (allModules[i].GetName() == moduleName) return &allModules[i];
@@ -378,7 +400,7 @@ private:
 			operatorsMap["&"] = bddop_and;
 			operatorsMap["|"] = bddop_or;
 			operatorsMap["->"] = bddop_imp;
-			operatorsMap["="] = bddop_biimp;
+			operatorsMap["<->"] = bddop_biimp;
 
 			statesMap["("] = 1;
 			statesMap[")"] = 2;
@@ -404,30 +426,61 @@ private:
 						bdd temp = getBDD(++i, ")", module);
 						res = bdd_apply(res, bdd_not(temp), prev_operator);
 					} else {
-						res = bdd_apply(res, bdd_not(module->GetVariable(tokenText[i]).varBDD()), prev_operator);
+						if ((module->GetVariable(tokenText[i]).GetVarBDDCnt() > 1) || (module->GetVariable(tokenText[i]).varValueBDD("TRUE") == bddfalsepp))
+							throw("Error. Variable '" + tokenText[i] + "' is not defined as boolean");
+						res = bdd_apply(res, bdd_not(module->GetVariable(tokenText[i]).varValueBDD("TRUE")), prev_operator);
 					}
 					break;
 				}
 				case 4: {
-					if (tokenText[++i] != "(") { break; }// throw Exception!!!
-					//bdd temp = getBDD(++i, ")", module); [TA] we can try to use grammar: next(expr) instead of next(var). But I will ignore it for first time
+					if (tokenText[++i] != "(") throw("Error while reading file. Expected '(', but '" + tokenText[i] + "' found.");
+					//[TA] we could try to use grammar: next(bool_expr) instead of next(var). But it is rather complicated so I will ignore it.
 					std::string varName = tokenText[++i];
 
-					Variable var = module->GetVariable(varName);
-					if (tokenText[++i] != ")") break; // throw Exception! NO!!! here can be "= value" code.
-					res = bdd_apply(res, var.nextBDD(), prev_operator);
+					
+					if (module->check_ifVariableExist(varName)) {
+						Variable currVar = module->GetVariable(varName);
+
+						i++;
+						if (tokenText[i] == ")") {
+							if ((currVar.GetVarBDDCnt() == 1) && (currVar.varValueBDD("TRUE") != bddfalsepp)) {
+								res = bdd_apply(res, currVar.nextVarValueBDD("TRUE"), prev_operator);
+							} else {
+								throw("Error while reading file. Variable '" + tokenText[i] + "' is not defined as boolean.");
+							}
+						} else if (tokenText[i] == "=") {
+							res = bdd_apply(res, currVar.nextVarValueBDD(tokenText[++i]), prev_operator);
+							if (tokenText[++i] != ")")
+								throw("Error while reading file. Expected ')' but '" + tokenText[i] + "' found.");
+						} else
+							throw("Error while reading file. Expected ')' or '=', but '" + tokenText[i] + "' found.");
+					} else
+						throw("Error while reading file. No variable '" + tokenText[i] + "' found.");
+
 					break;
 				}
-				case 5: break;//throw Exception
+				case 5: throw("Error while reading file. Expected boolean operator, but '" + tokenText[i] + "' found.");
 				default: {//variable name by default
 					if (module->check_ifVariableExist(tokenText[i])) {
-						res = bdd_apply(res, module->GetVariable(tokenText[i]).varBDD(), prev_operator);
-					} else {
-						//throw Exception!!!
-					}
+						Variable currVar = module->GetVariable(tokenText[i]);
+						if (tokenText[i + 1] == "=") {
+							i++;
+							std::string varValue = tokenText[++i];
+							if (currVar.varValueBDD(varValue) != bddfalsepp) {
+								res = bdd_apply(res, currVar.varValueBDD(varValue), prev_operator);
+							} else
+								throw("Error in input file. Variable '" + currVar.Name() + "' has no value '" + varValue + "'.");
+						} else if ((currVar.GetVarBDDCnt() == 1) && (currVar.varValueBDD("TRUE") != bddfalsepp)) {
+							res = bdd_apply(res, currVar.varValueBDD("TRUE"), prev_operator);
+						} else
+							throw("Error while reading file. Variable '" + currVar.Name() + "' is not defined as boolean.");
+					} else
+						throw("Error while reading file. No variable '" + tokenText[i] + "' found.");
 				}
 			}
 			i++;
+			if (i >= tokenText.size()) if (tokenText[++i] != ":") throw("Error while reading file. '" + stop_sym + "' expected before EOF");
+
 			if (operatorsMap[tokenText[i]] == -1) {//can be also ")" or ";"
 				continue;
 			} else if (operatorsMap[tokenText[i]] >= 0) {
@@ -438,81 +491,12 @@ private:
 					prev_operator = operatorsMap[tokenText[i]];
 				}
 				i++;
+
+				if (i >= tokenText.size()) if (tokenText[++i] != ":") throw("Error while reading file. " + stop_sym + " expected before EOF");
 			} else break;// !!! throw Exception!
 		}
 		return res;
 	}// end getBDD
-
-public:
-	FileText(std::string fileName) {
-		std::ifstream file(fileName);
-
-		if (!file.is_open())
-			std::cout << "File can not be opened!\n";//!!! throw Exception
-		else {
-			//getline(istream & is, string &s,char c='\n'),читает из потока is, в строку s пока не встретит символ c (без этого символа до новой строки)
-			// возвращает свой объект istream, в условии провер€етс€ состо€ние iostate флагa, значение этого флага будет ложным, если достигнет конца файла, или будет ошибка ввода или читаемого типа
-			std::string tmp;
-			while (getline(file,tmp))
-				text.push_back(tmp + "\n");
-		}
-		file.close();
-
-		delims.push_back(" "); delims.push_back("\t"); delims.push_back("\n"); delims.push_back("("); delims.push_back(".");
-		delims.push_back(")"); delims.push_back("{"); delims.push_back("}"); delims.push_back("//"); delims.push_back("!");
-		delims.push_back("/*"); delims.push_back("*/"); delims.push_back(","); delims.push_back(";"); delims.push_back(":=");
-		//delims.push_back("=");
-
-		tokenize();
-	}
-	
-    FileText(const FileText& other) {//  онструктор копировани€
-		allModules = other.allModules;
-		delims = other.delims;
-		text = other.text;
-		tokenText = other.tokenText;
-    }
-	
-	~FileText() {
-		text.clear();
-		tokenText.clear();
-		delims.clear();
-		allModules.clear();
-    }
-	
-	void tokenize() {
-		tokenText.clear();
-		std::pair<std::string, std::string> token;
-		for (unsigned i = 0; i < text.size(); i++) {
-			token = getToken(text[i]);
-			while(token.first != "") {
-				tokenText.push_back(token.first);
-				token = getToken(token.second);
-			}
-		}
-	}
-	
-	std::vector<std::string> getModuleNames() {
-		std::vector<std::string> res;
-		return res;
-	}
-
-	void removeExtraData() {
-		std::vector<std::string> tokens_clear;
-		for (unsigned i = 0; i < tokenText.size(); i++) {
-			if (tokenText[i] == "//") {
-				while((tokenText[i] != "\n") && (tokenText[i] != "")) {
-					i++;
-				}
-			}
-			if (tokenText[i] == "/*") {
-				while(tokenText[i++] != "*/")
-					if (tokenText[i] == "") throw("Comment is not closed");
-			}
-			if ((tokenText[i] != "*/") && (tokenText[i] != "\n")) tokens_clear.push_back(tokenText[i]);
-		}
-		tokenText = tokens_clear;
-	}
 
 	void readMainSMVModule() {
 		bool mainModuleExist = false;
@@ -550,10 +534,10 @@ public:
 						while(tokenText[j] != ")") {
 							std::string otherModuleName = tokenText[++j];// not needed for the first time.
 							otherModule = &allModules[modulePositions[otherModuleName]];
-							if (tokenText[++j] != ".") mainModuleExist = false;// throw Exception!!!
+							if (tokenText[++j] != ".") throw("!!!");
 
 							std::string varName = tokenText[++j];
-							if (!otherModule->AddVariable(varName)) mainModuleExist = false;// throw Exception!!!
+							if (!otherModule->AddVariable(varName)) throw("!!!");
 
 							FindModule(module_primary_name)->AddExternalVariable(otherModule->GetVariable(varName));
 							if (tokenText[++j] == ",") continue;
@@ -566,12 +550,70 @@ public:
 		if (!mainModuleExist) return;//throw Exception!!!
 	}
 
+public:
+	FileText(std::string fileName) {
+		std::ifstream file(fileName);
+
+		if (!file.is_open())
+			std::cout << "File can not be opened!\n";//!!! throw Exception
+		else {
+			std::string tmp;
+			while (getline(file,tmp))
+				text.push_back(tmp + "\n");
+		}
+		file.close();
+
+		delims.push_back(" "); delims.push_back("\t"); delims.push_back("\n"); delims.push_back("("); delims.push_back(".");
+		delims.push_back(")"); delims.push_back("{"); delims.push_back("}"); delims.push_back("//"); delims.push_back("!");
+		delims.push_back("/*"); delims.push_back("*/"); delims.push_back(","); delims.push_back(";"); delims.push_back(":=");
+		//delims.push_back("=");
+
+		tokenize();
+	}
+	
+    FileText(const FileText& other) {//  онструктор копировани€
+		allModules = other.allModules;
+		delims = other.delims;
+		text = other.text;
+		tokenText = other.tokenText;
+    }
+	
+	~FileText() {
+		text.clear();
+		tokenText.clear();
+		delims.clear();
+		allModules.clear();
+    }
+	
+	std::vector<std::string> getModuleNames() {
+		std::vector<std::string> res;
+		return res;
+	}
+
+	void removeExtraData() {
+		std::vector<std::string> tokens_clear;
+		for (unsigned i = 0; i < tokenText.size(); i++) {
+			if (tokenText[i] == "//") {
+				while((tokenText[i] != "\n") && (tokenText[i] != "")) {
+					i++;
+				}
+			}
+			if (tokenText[i] == "/*") {
+				while(tokenText[i++] != "*/")
+					if (tokenText[i] == "") throw("Comment is not closed");
+			}
+			if ((tokenText[i] != "*/") && (tokenText[i] != "\n")) tokens_clear.push_back(tokenText[i]);
+		}
+		tokenText = tokens_clear;
+	}
+
 	void readSMVModules() {
-		bdd_init(10000000,1000000);//[TA] what to set here?
+		removeExtraData();
+		bdd_init(20000000,2000000);//[TA] what to set here?
 		bdd_setcacheratio(10);
 		bdd_enable_reorder();
 
-		readMainSMVModule();// здесь читаетс€, какие будут модули, создаютс€ пустые модули-элементы класса, описываютс€ переменные.
+		readMainSMVModule();//here we read all modules names, create empty  создаютс€ пустые модули-элементы класса, описываютс€ переменные.
 
 		//======================
 		// Main parser!
@@ -597,18 +639,35 @@ public:
 				}
 
 				if (tokenText[i] == "VAR") {
-					std::string next = tokenText[++i];
+					std::string next = tokenText[i + 1];
 					while ((next != "TRANS") && (next != "MODULE") && (next != "JUSTICE") && (next != "ASSIGN")) {
 						// read MODULE variables
-						std::string name = tokenText[i];
-						if (tokenText[++i] != ":") { break; } // throw exception!!!
+						std::string name = tokenText[++i];
+						if (tokenText[++i] != ":") throw("Error in input file. ':' expected but '" + tokenText[i] + "' found");
 						std::string type = tokenText[++i];
 						if (type == "boolean") {
 							if (module == NULL) break;
 							module->AddVariable(name);
+						} else if (type == "{") {//enumerable type
+							std::vector<std::string> varValues;
+							while(true) {
+								std::string varValue = tokenText[++i];
+								varValues.push_back(varValue);
+
+								i++;
+								if (tokenText[i] == "}") {
+									break;
+								} else if (tokenText[i] == ",") {
+									continue;
+								} else
+									throw("Error in input file. '}' or ',' expected but '" + tokenText[i] + "' found");
+							}
+							Variable currentVar(name, varValues);
+							module->AddVariable(currentVar);
 						}
 
-						if (tokenText[++i] != ";") { break; } // throw exception!!!
+						if (tokenText[++i] != ";") { throw("Error in input file. ';' expected but '" + tokenText[i] + "' found"); }
+						next = tokenText[i + 1];
 						//!!!add the case when variable has enumerable values
 					}
 				}
@@ -685,7 +744,7 @@ public:
 						allModules[m].AddJustice(temp);
 						break;
 					}
-					default: {std::cout<<"ERROR!\n";}//throw exception
+					default: { throw("Error while reading file. One of 'MODULE', 'VAR', 'ASSIGN', 'TRANS', 'JUSTICE' expected but '" + tokenText[i] + "' found"); }
 				}// end switch
 			}
 		}
@@ -716,13 +775,16 @@ private:
 	SMVModule sys;
 	SMVModule env;
 	Variable jx;
-	int coxCnt;
 	std::vector<std::vector<std::vector<bdd>>> x_strat;//strategies for the system: leads the computation to J1-states
 	std::vector<std::vector<bdd>> y_strat;//strategy for the system: leads the computation to get closer to J2-states
 
-	unsigned log2(int k) {
+	unsigned log2(int val) {
+		if (val == 0) return UINT_MAX;
 		unsigned log = 0;
-		while (k >>= 1) log++;
+		while (val > 1) {
+			val = val / 2 + val % 2;
+			log++;
+		}
 		return log;
 	}// end log2
 
@@ -737,9 +799,9 @@ private:
 			std::vector<Variable> env_vars = env.GetInternalVariables();
 
 			for (unsigned i = 0; i < sys_vars.size(); i++)
-				bdd_setpairs(sysEnv_Pairs, sys_vars[i].IDs(), sys_vars[i].NextIDs(), 1);//!!! сделать не 1, а количество в общем случае
+				bdd_setpairs(sysEnv_Pairs, sys_vars[i].IDs(), sys_vars[i].NextIDs(), sys_vars[i].GetVarBDDCnt());
 			for (unsigned i = 0; i < env_vars.size(); i++)
-				bdd_setpairs(sysEnv_Pairs, env_vars[i].IDs(), env_vars[i].NextIDs(), 1);//!!! сделать не 1, а количество в общем случае
+				bdd_setpairs(sysEnv_Pairs, env_vars[i].IDs(), env_vars[i].NextIDs(), sys_vars[i].GetVarBDDCnt());
 		}
 
 		return bdd_replace(vars, sysEnv_Pairs);
@@ -765,7 +827,7 @@ private:
 	}// end NextAll
 
 	bdd UnprimeAll(bdd vars) {//get previous variable
-		static bddPair *allVars_Pairs = bdd_newpair();
+		static bddPair *allVars_InvertPairs = bdd_newpair();
 
 		static bool b = true;
 		if (b) {//used to call the code below only once
@@ -775,12 +837,12 @@ private:
 			std::vector<Variable> env_vars = env.GetInternalVariables();
 
 			for (unsigned i = 0; i < sys_vars.size(); i++)
-				bdd_setpairs(allVars_Pairs, sys_vars[i].NextIDs(), sys_vars[i].IDs(), 1);//!!! сделать не 1, а количество в общем случае
+				bdd_setpairs(allVars_InvertPairs, sys_vars[i].NextIDs(), sys_vars[i].IDs(), 1);//!!! сделать не 1, а количество в общем случае
 			for (unsigned i = 0; i < env_vars.size(); i++)
-				bdd_setpairs(allVars_Pairs, env_vars[i].NextIDs(), env_vars[i].IDs(), 1);//!!! сделать не 1, а количество в общем случае
-			bdd_setpairs(allVars_Pairs, jx.NextIDs(), jx.IDs(), jx.GetVarBDDCnt());
+				bdd_setpairs(allVars_InvertPairs, env_vars[i].NextIDs(), env_vars[i].IDs(), 1);//!!! сделать не 1, а количество в общем случае
+			bdd_setpairs(allVars_InvertPairs, jx.NextIDs(), jx.IDs(), jx.GetVarBDDCnt());
 		}
-		return bdd_replace(vars, allVars_Pairs);
+		return bdd_replace(vars, allVars_InvertPairs);
 	}// end UnprimeAll
 	
 	bdd forsome_V(bdd fun) {
@@ -802,25 +864,6 @@ private:
 		return bdd_exist(fun, v_BDDset);
 	}// end forsome_V
 
-	bdd forsome_next_V(bdd fun) {
-		std::vector<int> sys_vars_ids = sys.GetVariablesNextIds();
-		std::vector<int> env_vars_ids = env.GetVariablesNextIds();
-
-		int *primed_env_sys_jx_arr = new int[sys_vars_ids.size() + env_vars_ids.size() + jx.GetVarBDDCnt()];
-
-		for (unsigned i = 0; i < sys_vars_ids.size(); i++)
-			 primed_env_sys_jx_arr[i] = sys_vars_ids[i];
-		for (unsigned i = 0; i < env_vars_ids.size(); i++)
-			primed_env_sys_jx_arr[sys_vars_ids.size() + i] = env_vars_ids[i];
-		for (unsigned i = 0; i < jx.GetVarBDDCnt(); i++) {
-			primed_env_sys_jx_arr[sys_vars_ids.size() + env_vars_ids.size() + i] = jx.NextIDs()[i];
-		}
-
-		//exist v' from V: env_pr, sys_pr or jx_pr
-		bdd nextV_BDDset = bdd_makeset(primed_env_sys_jx_arr, sys_vars_ids.size() + env_vars_ids.size() + jx.GetVarBDDCnt());
-		return bdd_exist(fun, nextV_BDDset);
-	}// end forsome_next_V
-
 	bdd forsome_next_jx(bdd fun) {
 		//exist some primed jx
 		bdd nextJx_BDDset = bdd_makeset(jx.NextIDs(), jx.GetVarBDDCnt());
@@ -829,7 +872,7 @@ private:
 
 	//[TA] check one more time!!!
 	bdd step(bdd phi) { // function is named cox in the article
-		coxCnt++;
+		cox_cnt++;
 		std::vector<Variable> sys_vars = sys.GetInternalVariables();
 
 		static bdd sys_next_bdd = bddtruepp;//[TA] check: may be bddfalsepp
@@ -906,9 +949,9 @@ private:
 
 		bdd obseq = bddtrue; //describes transitions where all variables except jx doesn't change:
 		for (unsigned i = 0; i < env_vars.size(); i++)
-			obseq &= bdd_biimp(env_vars[i].varBDD(), env_vars[i].nextBDD());//[TA] this will not work with enumerable variables!!!
+			obseq &= env_vars[i].GetEqualNextBDD();
 		for (unsigned i = 0; i < sys_vars.size(); i++)
-			obseq &= bdd_biimp(sys_vars[i].varBDD(), sys_vars[i].nextBDD());//[TA] this will not work with enumerable variables!!!
+			obseq &= sys_vars[i].GetEqualNextBDD();
 
 		bdd states = forsome_next_V(trans & obseq & jx.varValueBDD(j) & jx.nextVarValueBDD(k));
 		bdd add_trans = forsome_next_jx(trans & NextAll(states)) & jx.nextVarValueBDD(k);
@@ -916,16 +959,6 @@ private:
 		trans = (trans & !(NextAll(states) | states)) | add_trans;
 		init = (init & !(states & jx.varValueBDD(j))) | add_init;
 	}// end reduce
-
-	bdd allReachableTrans(bdd & bddTrans) {
-		bdd res = env.GetInitial() & sys.GetInitial() & bddTrans,
-			res_old;
-		do {
-			res_old = res;
-			res = res | (UnprimeAll(forsome_V(res)) & bddTrans);
-		} while(res_old != res);
-		return res;
-	}// end allReachableTrans
 
 	State GetState(bdd allVarsBDD, bool ifFrom) {
 		bdd bddState = allVarsBDD;//delete later bddState!!!
@@ -967,7 +1000,6 @@ public:
 		sys = system;
 		y_strat.resize(sys.GetJustice().size());
 		x_strat.resize(sys.GetJustice().size());
-		coxCnt = 0;
 	}
 	
 	GRGame& operator=(const GRGame& other) {
@@ -990,7 +1022,6 @@ public:
 			for (unsigned j = 0; j < sys.GetJustice().size(); j++)
 				z = leastFixPoint(z, j);
 		} while(z != z_old);
-		std::cout<<"\n"<<coxCnt<<"\n";
 		return z;
 	}// end WinningRegion
 
@@ -1046,7 +1077,7 @@ public:
 			reduce(trans, sys.GetJustice().size() - 1, j);
 	}
 
-	void deleteStutteringTransitions(bdd & bddtrans) {
+	void removeStuttering(bdd &bddtrans) {
 		bdd stutter = bddtruepp;//only stuttering transitions (from states to themselves)
 		for (unsigned i = 0; i < jx.GetVarBDDCnt(); i++)
 			stutter &= bdd_biimp(bdd_ithvarpp(jx.IDs()[i]), bdd_ithvarpp(jx.NextIDs()[i]));
@@ -1056,13 +1087,23 @@ public:
 			stutter &= bdd_biimp(bdd_ithvarpp(sys.GetVariablesIds()[i]), bdd_ithvarpp(sys.GetVariablesNextIds()[i]));
 
 		bddtrans &= !stutter;
-	}// end deleteStutteringTransitions
+	}// end removeStuttering
 
-	int printDot(std::string fileName, bdd & bddtrans) {
+	bdd GetAllReachableTrans(bdd & bddTrans) {
+		bdd res = env.GetInitial() & sys.GetInitial() & bddTrans,
+			res_old;
+		do {
+			res_old = res;
+			res = res | (UnprimeAll(forsome_V(res)) & bddTrans);
+		} while(res_old != res);
+		return res;
+	}// end allReachableTrans
+
+	void printDot(std::string fileName, bdd bddtrans) {
 		std::ofstream out(fileName);
-		if (!out.is_open()) return -1;//throw Exception!!!
+		if (!out.is_open()) return;//throw Exception!!!
 
-		bdd nonPrinted_trans = allReachableTrans(bddtrans);
+		bdd nonPrinted_trans = GetAllReachableTrans(bddtrans);
 		bdd trans_curr_bdd;
 	
 		out<<"digraph G {"<<std::endl;
@@ -1094,37 +1135,82 @@ public:
 			nonPrinted_trans &= !trans_curr_bdd;
 		}
 		out<<"}"<<std::endl;
-	
-		return 1;
 	}// end printDot
+	
+	bdd forsome_next_V(bdd fun) {//[TA] put it to private!!!
+		std::vector<int> sys_vars_ids = sys.GetVariablesNextIds();
+		std::vector<int> env_vars_ids = env.GetVariablesNextIds();
+
+		int *primed_env_sys_jx_arr = new int[sys_vars_ids.size() + env_vars_ids.size() + jx.GetVarBDDCnt()];
+
+		for (unsigned i = 0; i < sys_vars_ids.size(); i++)
+			 primed_env_sys_jx_arr[i] = sys_vars_ids[i];
+		for (unsigned i = 0; i < env_vars_ids.size(); i++)
+			primed_env_sys_jx_arr[sys_vars_ids.size() + i] = env_vars_ids[i];
+		for (unsigned i = 0; i < jx.GetVarBDDCnt(); i++) {
+			primed_env_sys_jx_arr[sys_vars_ids.size() + env_vars_ids.size() + i] = jx.NextIDs()[i];
+		}
+
+		//exist v' from V: env_pr, sys_pr or jx_pr
+		bdd nextV_BDDset = bdd_makeset(primed_env_sys_jx_arr, sys_vars_ids.size() + env_vars_ids.size() + jx.GetVarBDDCnt());
+		return bdd_exist(fun, nextV_BDDset);
+	}// end forsome_next_V
+
 };// end class GRGame
 
+void printFullSAT(bdd tmp) {
+	std::ofstream out("tmp.txt");
+	while (tmp != bddfalsepp) {
+		bdd tmp1 = bdd_fullsatone(tmp);
+		out << tmp1 << "\n";
+		tmp &= !tmp1;
+	}
+}
 int main(void)
 {
-	FileText file("arbiter2.smv");
+	try {
+		cox_cnt = 0;
+		FileText file("enum_test0.smv");
+		//FileText file("arbiter2.smv");
 
-	file.removeExtraData();//remove all comments
-	int test = bdd_varnum();
-	file.readSMVModules();
-	test = bdd_varnum();
-	SMVModule sys(file.GetModule("sys"));
-	SMVModule env(file.GetModule("env"));
-	test = bdd_varnum();
-	GRGame arbiter2(env, sys);
+		file.readSMVModules();
 
-	test = bdd_varnum();
-	bdd win_reg = arbiter2.WinningRegion();
-	if ((env.GetInitial() & sys.GetInitial() & win_reg) == bddfalse) {
-		std::cout << "GR requirements are not realizable!" << std::endl;
+		SMVModule sys(file.GetModule("sys"));
+		SMVModule env(file.GetModule("env"));
+
+		GRGame arbiter2(env, sys);
+		long t1 = clock();
+		bdd win_reg = arbiter2.WinningRegion();
+		if ((env.GetInitial() & sys.GetInitial() & win_reg) == bddfalse) {
+			std::cout << "GR requirements are not realizable!" << std::endl;
+		}
+		long t2 = clock();
+		std::cout << "Time1 : " << t2 - t1 << std::endl;
+		bdd jds = arbiter2.getConroller(win_reg);
+		long t3 = clock();
+		std::cout << "synthesis : " << t3 - t2 << std::endl;
+
+		arbiter2.removeStuttering(jds);//[TA] вообще, система переходов должна быть детерминированной по построению => она без дребезжани€!!!
+		//jds = arbiter2.GetAllReachableTrans(jds); // если удалить недостижимые переходы, минимизаци€ пройдет быстрее. ј затем снова можно удалить недостижимые. ¬џ√ќƒЌќ!
+
+		arbiter2.printDot("JDS_result.dot", jds);
+		arbiter2.Minimize(jds);
+		
+		arbiter2.removeStuttering(jds);//[TA] вообще, система переходов должна быть детерминированной по построению => она без дребезжани€!!!
+		
+		jds = arbiter2.GetAllReachableTrans(jds);
+		
+		//std::cout << "getReachable : " << t4 - t3 << std::endl;
+		std::cout << "minimize : " << clock() - t3 << std::endl;
+		//printFullSAT(jds);
+		std::cout << "cox cnt " << cox_cnt << "\n\n";
+		std::cout << "SAT count : " << bdd_satcount(jds) << std::endl;
+		//std::cout << "Node count: " << bdd_nodecount(jds) << std::endl;
+		//std::cout << "Controller nodes count: " << bdd_satcount(arbiter2.forsome_next_V(arbiter2.GetAllReachableTrans(jds)) & bdd_ithvar(0) & bdd_ithvar(2) & bdd_ithvar(4) & bdd_ithvar(6) & bdd_ithvar(8) & bdd_ithvar(10) & bdd_ithvar(12) & arbiter2.[0]) << std::endl;
 	}
-
-	test = bdd_varnum();
-	bdd jds = arbiter2.getConroller(win_reg);
-	arbiter2.deleteStutteringTransitions(jds);//[TA] вообще, система переходов должна быть детерминированной по построению => она без дребезжани€!!!
-
-	arbiter2.Minimize(jds);
-	arbiter2.deleteStutteringTransitions(jds);//[TA] вообще, система переходов должна быть детерминированной по построению => она без дребезжани€!!!
-	arbiter2.printDot("JDS_result.dot", jds);
+	catch(std::string err) {
+		std::cout << err << std::endl;
+	}
 
 	system("pause");
 	return 0;
