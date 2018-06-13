@@ -31,6 +31,7 @@ Last modified: June 2018
 #include <time.h>
 
 int cox_cnt;
+long winm_time;
 struct State {
 	std::string name;
 	std::string title;
@@ -953,8 +954,12 @@ private:
 			sys_next_bdd = bdd_makeset(sys_next_arr, sys_varsIDs.size());
 		}
 		//p_e => \exist y' such that (p_s and phi(x',y'))
-
-		bdd res = bdd_imp(env.GetTransition(), bdd_exist(sys.GetTransition() & Next(phi), sys_next_bdd));
+		
+		bdd temp = bdd_exist(sys.GetTransition() & Next(phi), sys_next_bdd);
+		long t = clock();//!!!!!!!!!delete this
+		bdd res = bdd_imp(env.GetTransition(), temp);
+		winm_time += clock() - t;//!!!!!!!!!delete this
+		
 		//\foreach x'
 		std::vector<int> env_next_IDs = env.GetVariablesNextIds();
 		for (unsigned i = 0; i < env_next_IDs.size(); i++)
@@ -985,12 +990,10 @@ private:
 			x_strat[j][r].resize(env.GetJustice().size());
 
 			y_old = y;
-
 			start = sys.GetJustice()[j] & step(z) | step(y);
 			y = bddfalsepp;
 			for (unsigned i = 0; i < env.GetJustice().size(); i++) {
 				x = greatestFixPoint(z, start, i);
-
 				x_strat[j][r][i] = x;
 				y |= x;
 			}
@@ -1229,10 +1232,10 @@ int main(void)
 {
 	try {
 		cox_cnt = 0;
-		FileText file("arbiter9.smv");
+		FileText file("arbiter8.smv");
 
 		file.readSMVModules();
-
+		winm_time = 0;//temp!!!!!!!!
 		SMVModule sys(*file.GetModule("sys"));
 		SMVModule env(*file.GetModule("env"));
 		GRGame arbiter2(env, sys);
@@ -1243,6 +1246,7 @@ int main(void)
 		}
 		long t2 = clock();
 		std::cout << "Win reg: " << t2 - t1 << std::endl;
+		std::cout << "Win reg from winm_time: " << winm_time << std::endl;
 		bdd jds = arbiter2.getConroller(win_reg);
 		long t3 = clock();
 		std::cout << "synthesis : " << t3 - t2 << std::endl;
