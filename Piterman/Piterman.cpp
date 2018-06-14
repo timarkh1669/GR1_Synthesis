@@ -13,11 +13,6 @@ tim_arkh@mail.ru
 Last modified: June 2018
 */
 
-//check for [TA]
-//check for !!!
-//change "static"
-//check if extra ")"
-
 #pragma comment(lib, "Debug/bdd.lib")	// BuDDy library
 #include "bdd.h"
 
@@ -26,12 +21,8 @@ Last modified: June 2018
 #include <set>
 #include <map>
 #include <fstream>
-#include <ostream>
-#include <sstream>
 #include <time.h>
 
-int cox_cnt;
-long winm_time;
 struct State {
 	std::string name;
 	std::string title;
@@ -231,6 +222,7 @@ private:
 	bdd initial;
 	bdd transition;
 	std::vector<bdd> justice;
+
 public:
 	SMVModule() {
 		moduleName = "";
@@ -244,27 +236,28 @@ public:
 		transition = bddtruepp;
 	}
 	
-	SMVModule(const SMVModule& other) {// copying constructor
+	SMVModule(const SMVModule& other) {
+		moduleName = other.moduleName;
 		vars = other.vars;
 		externalVars = other.externalVars;
-		moduleName = other.moduleName;
+		vars_IDs = other.vars_IDs;
+		vars_NextIDs = other.vars_NextIDs;
 		initial = other.initial;
 		transition = other.transition;
 		justice = other.justice;
 	}
-	
-	void swap(SMVModule &smv1, SMVModule &smv2) {//[TA] or friend function?
-		std::swap(smv1.vars, smv2.vars);
-		std::swap(smv1.externalVars, smv2.externalVars);
-		std::swap(smv1.moduleName, smv2.moduleName);
-		std::swap(smv1.initial, smv2.initial);
-		std::swap(smv1.transition, smv2.transition);
-		std::swap(smv1.justice, smv2.justice);
-	}
-	
+
 	SMVModule& operator=(const SMVModule& other) {
-        SMVModule tmp(other);
-		swap(*this, tmp);
+		if (this != &other) {
+			moduleName = other.moduleName;
+			vars = other.vars;
+			externalVars = other.externalVars;
+			vars_IDs = other.vars_IDs;
+			vars_NextIDs = other.vars_NextIDs;
+			initial = other.initial;
+			transition = other.transition;
+			justice = other.justice;
+        }
         return *this;
     }
 	// end constructors
@@ -272,6 +265,8 @@ public:
 		moduleName.clear();
 		vars.clear();
 		externalVars.clear();
+		vars_IDs.clear();
+		vars_NextIDs.clear();
 		justice.clear();
     }
 
@@ -342,11 +337,11 @@ public:
 	bool AddVariable(Variable var) {
 		for (unsigned i = 0; i < vars.size(); i++)
 			if (var.Name() == vars[i].Name()) {
-				/* [TA] we suppose that there will be no empty variables
+				//We suppose that there will be no empty variables. But this code is used to be on the safe side.
 				if (vars[i].GetVarBDDCnt() == 0) {
 					vars[i] = var;
 					return true;
-				}*/
+				}
 				return false;
 			}
 
@@ -412,7 +407,7 @@ private:
 	std::pair<int, unsigned> getFirstDelimiterPos(std::vector<std::string> delims, std::string val) {
 		std::pair<int, unsigned> min_index(val.size() + 1, delims.size());
 
-		for (unsigned i = 0; i < delims.size(); i++) {//[TA] !!! need some optimisation
+		for (unsigned i = 0; i < delims.size(); i++) {
 			int index = val.find(delims[i]);
 			if ((index >= 0) && (index < min_index.first)) {
 				min_index.first = index;
@@ -451,7 +446,8 @@ private:
 	bdd getBDD(unsigned &i, std::string stop_sym, SMVModule* module) {
 		bdd res = bddtrue;
 		int prev_operator = bddop_and;
-		// !!!!!!! добавить приоритеты операторов!
+		// [TA] the main thing that should be also implemented: 
+		// There is no boolean operators priority. Should be added later...
 		static std::map<std::string, int> operatorsMap;
 		static std::map<std::string, int> statesMap;
 		if (operatorsMap.size() == 0) {//used to call the code below only once
@@ -477,15 +473,12 @@ private:
 					res = bdd_apply(res, temp, prev_operator);
 					break;
 				}
-				case 2: {
-					i++;
-					break;//throw exception: we can not reach this case!!!
-				}
+				case 2:	throw("Error in input file. Extra ')' was found");
 				case 3: {
 					if (tokenText[++i] == "(") {
 						bdd temp = getBDD(++i, ")", module);
 						res = bdd_apply(res, bdd_not(temp), prev_operator);
-					} else {
+					} else {//[TA] I could also use grammar "!next(var)" or next(!var), but it is not necessary for now.
 						if ((module->GetVariable(tokenText[i]).GetVarBDDCnt() > 1) || (module->GetVariable(tokenText[i]).varValueBDD("TRUE") == bddfalsepp))
 							throw("Error. Variable '" + tokenText[i] + "' is not defined as boolean");
 						res = bdd_apply(res, bdd_not(module->GetVariable(tokenText[i]).varValueBDD("TRUE")), prev_operator);
@@ -494,10 +487,9 @@ private:
 				}
 				case 4: {
 					if (tokenText[++i] != "(") throw("Error while reading file. Expected '(', but '" + tokenText[i] + "' found.");
-					//[TA] we could try to use grammar: next(bool_expr) instead of next(var). But it is rather complicated so I will ignore it.
+					//[TA] I could try to use grammar: next(bool_expr) instead of next(var). But it is rather complicated so I will ignore it.
 					std::string varName = tokenText[++i];
 
-					
 					if (module->check_ifVariableExist(varName)) {
 						Variable currVar = module->GetVariable(varName);
 
@@ -506,20 +498,20 @@ private:
 							if ((currVar.GetVarBDDCnt() == 1) && (currVar.varValueBDD("TRUE") != bddfalsepp)) {
 								res = bdd_apply(res, currVar.nextVarValueBDD("TRUE"), prev_operator);
 							} else {
-								throw("Error while reading file. Variable '" + tokenText[i] + "' is not defined as boolean.");
+								throw("Error in input file. Variable '" + tokenText[i] + "' is not defined as boolean.");
 							}
 						} else if (tokenText[i] == "=") {
 							res = bdd_apply(res, currVar.nextVarValueBDD(tokenText[++i]), prev_operator);
 							if (tokenText[++i] != ")")
-								throw("Error while reading file. Expected ')' but '" + tokenText[i] + "' found.");
+								throw("Error in input file. Expected ')' but '" + tokenText[i] + "' found.");
 						} else
-							throw("Error while reading file. Expected ')' or '=', but '" + tokenText[i] + "' found.");
+							throw("Error in input file. Expected ')' or '=', but '" + tokenText[i] + "' found.");
 					} else
-						throw("Error while reading file. No variable '" + tokenText[i] + "' found.");
+						throw("Error in input file. No variable '" + tokenText[i] + "' found.");
 
 					break;
 				}
-				case 5: throw("Error while reading file. Expected boolean operator, but '" + tokenText[i] + "' found.");
+				case 5: throw("Error in input file. Expected boolean operator, but '" + tokenText[i] + "' found.");
 				default: {//variable name by default
 					if (module->check_ifVariableExist(tokenText[i])) {
 						Variable currVar = module->GetVariable(tokenText[i]);
@@ -533,13 +525,13 @@ private:
 						} else if ((currVar.GetVarBDDCnt() == 1) && (currVar.varValueBDD("TRUE") != bddfalsepp)) {
 							res = bdd_apply(res, currVar.varValueBDD("TRUE"), prev_operator);
 						} else
-							throw("Error while reading file. Variable '" + currVar.Name() + "' is not defined as boolean.");
+							throw("Error in input file. Variable '" + currVar.Name() + "' is not defined as boolean.");
 					} else
-						throw("Error while reading file. No variable '" + tokenText[i] + "' found.");
+						throw("Error in input file. No variable '" + tokenText[i] + "' found.");
 				}
 			}
 			i++;
-			if (i >= tokenText.size()) if (tokenText[++i] != ":") throw("Error while reading file. '" + stop_sym + "' expected before EOF");
+			if (i >= tokenText.size()) throw("Error in input file. '" + stop_sym + "' expected before EOF");
 
 			if (operatorsMap[tokenText[i]] == -1) {//can be also ")" or ";"
 				continue;
@@ -552,8 +544,8 @@ private:
 				}
 				i++;
 
-				if (i >= tokenText.size()) if (tokenText[++i] != ":") throw("Error while reading file. " + stop_sym + " expected before EOF");
-			} else break;// !!! throw Exception!
+				if (i >= tokenText.size()) throw("Error in input file. " + stop_sym + " expected before EOF");
+			} else throw("Error in input file. Expected one of: ')', ';', '&', '|', '->', '<->' but '" + tokenText[i] + "' found.");
 		}
 		return res;
 	}// end getBDD
@@ -566,11 +558,11 @@ private:
 			if ((tokenText[i] == "MODULE") && (tokenText[i + 1] == moduleName)) break;
 			++i;
 		}
-		if (i == tokenText.size()) {
+		if (i == tokenText.size())
 			throw("Somethig went wrong... Module '" + moduleName + "' was not defined.");
-		}
+
 		if (tokenText[++i] == "(") {
-			while(tokenText[++i] != ")") {}//later check if all external variables were defined earlier !!!
+			while(tokenText[++i] != ")") {}//later check if all external variables were defined earlier. Not implemented, but may be(?) it is excess.
 		}
 		while ((tokenText[i] != "VAR") && (tokenText[i] != "MODULE") && (i < tokenText.size() - 1)) { ++i; }
 
@@ -680,7 +672,7 @@ public:
 		std::ifstream file(fileName);
 
 		if (!file.is_open())
-			std::cout << "File can not be opened!\n";//!!! throw Exception
+			throw("Error. File can not be opened!");
 		else {
 			std::string tmp;
 			while (getline(file,tmp))
@@ -695,21 +687,7 @@ public:
 
 		tokenize();
 	}
-	
-    FileText(const FileText& other) {//  онструктор копировани€
-		allModules = other.allModules;
-		delims = other.delims;
-		text = other.text;
-		tokenText = other.tokenText;
-    }
-	
-	~FileText() {
-		text.clear();
-		tokenText.clear();
-		delims.clear();
-		allModules.clear();
-    }
-	
+
 	std::vector<std::string> getModuleNames() {
 		std::vector<std::string> res;
 		return res;
@@ -748,7 +726,7 @@ public:
 			int state = 0;
 			std::string part;
 			std::map<std::string, int> statesMap;
-			// check if we read "MODULE" token while reading our module, this means our module description is ended
+			// check if we read "MODULE" token while reading our module: this means our (current) module description is ended
 				statesMap["MODULE"] = 1;
 				statesMap["VAR"] = 2;
 				statesMap["ASSIGN"] = 3;
@@ -773,7 +751,8 @@ public:
 					//5: read MODULE justice requirements
 					case 0: break;
 					case 1: { // read MODULE with requested name
-						if (tokenText[i++] != allModules[m].GetName()) { state = 0; break; }//throw Exception!!!
+						if (tokenText[i++] != allModules[m].GetName()) { state = 0; break; }
+
 						if (tokenText[i] == "(") {
 							// read MODULE agruments: we are not reading them for the first time.
 							while(tokenText[++i] != ")") { }
@@ -822,13 +801,13 @@ public:
 		return NULL;//throw Exception
 	}
 
-	void printFile(std::ostream& stream) {
+	void printFile(std::ofstream& stream) {
 		for (unsigned i = 0; i < text.size(); i++) {
 			stream << text[i];
 		}
 	}
 
-	void printFileTokens(std::ostream& stream) {
+	void printFileTokens(std::ofstream& stream) {
 		for (unsigned i = 0; i < tokenText.size(); i++) {
 			stream << tokenText[i] << " ";
 		}
@@ -842,16 +821,6 @@ private:
 	Variable jx;
 	std::vector<std::vector<std::vector<bdd>>> x_strat;//strategies for the system: leads the computation to J1-states
 	std::vector<std::vector<bdd>> y_strat;//strategy for the system: leads the computation to get closer to J2-states
-
-	unsigned log2(int val) {
-		if (val == 0) return UINT_MAX;
-		unsigned log = 0;
-		while (val > 1) {
-			val = val / 2 + val % 2;
-			log++;
-		}
-		return log;
-	}// end log2
 
 	bdd Next(bdd vars) {
 		static bddPair *sysEnv_Pairs = bdd_newpair();
@@ -918,34 +887,56 @@ private:
 		std::vector<int> sys_vars_ids = sys.GetVariablesIds();
 		std::vector<int> env_vars_ids = env.GetVariablesIds();
 
-		int *env_sys_jx_arr = new int[sys_vars_ids.size() + env_vars_ids.size() + jx.GetVarBDDCnt()];
+		static bdd v_BDDset = bddtruepp;
+		if (v_BDDset == bddtruepp) {//this condition is to initialise v_BDDset only once
+			int *env_sys_jx_arr = new int[sys_vars_ids.size() + env_vars_ids.size() + jx.GetVarBDDCnt()];
 
-		for (unsigned i = 0; i < sys_vars_ids.size(); i++)
-			 env_sys_jx_arr[i] = sys_vars_ids[i];
-		for (unsigned i = 0; i < env_vars_ids.size(); i++)
-			env_sys_jx_arr[sys_vars_ids.size() + i] = env_vars_ids[i];
-		for (unsigned i = 0; i < jx.GetVarBDDCnt(); i++) {
-			env_sys_jx_arr[sys_vars_ids.size() + env_vars_ids.size() + i] = jx.IDs()[i];
+			for (unsigned i = 0; i < sys_vars_ids.size(); i++)
+				 env_sys_jx_arr[i] = sys_vars_ids[i];
+			for (unsigned i = 0; i < env_vars_ids.size(); i++)
+				env_sys_jx_arr[sys_vars_ids.size() + i] = env_vars_ids[i];
+			for (unsigned i = 0; i < jx.GetVarBDDCnt(); i++)
+				env_sys_jx_arr[sys_vars_ids.size() + env_vars_ids.size() + i] = jx.IDs()[i];
+
+			v_BDDset = bdd_makeset(env_sys_jx_arr, sys_vars_ids.size() + env_vars_ids.size() + jx.GetVarBDDCnt());
 		}
 
 		//exist v from V: env, sys or jx
-		bdd v_BDDset = bdd_makeset(env_sys_jx_arr, sys_vars_ids.size() + env_vars_ids.size() + jx.GetVarBDDCnt());
 		return bdd_exist(fun, v_BDDset);
 	}// end forsome_V
 
 	bdd forsome_next_jx(bdd fun) {
 		//exist some primed jx
-		bdd nextJx_BDDset = bdd_makeset(jx.NextIDs(), jx.GetVarBDDCnt());
+		static bdd nextJx_BDDset = bdd_makeset(jx.NextIDs(), jx.GetVarBDDCnt());
 		return bdd_exist(fun, nextJx_BDDset);
 	}// end forsome_next_jx
 
-	//[TA] check one more time!!!
-	bdd step(bdd phi) { // function is named cox in the article
-		cox_cnt++;
-		std::vector<int> sys_varsIDs = sys.GetVariablesNextIds();
+	bdd forsome_next_V(bdd fun) {
+		std::vector<int> sys_vars_next_ids = sys.GetVariablesNextIds();
+		std::vector<int> env_vars_next_ids = env.GetVariablesNextIds();
 
-		static bdd sys_next_bdd = bddtruepp;//[TA] check: may be bddfalsepp
-		if (sys_next_bdd == bddtruepp) {//[TA] this condition is to initialise sys_next_bdd only once
+		static bdd nextV_BDDset = bddtruepp;
+		if (nextV_BDDset == bddtruepp) {//this condition is to initialise nextV_BDDset only once
+			int *primed_env_sys_jx_arr = new int[sys_vars_next_ids.size() + env_vars_next_ids.size() + jx.GetVarBDDCnt()];
+
+			for (unsigned i = 0; i < sys_vars_next_ids.size(); i++)
+				 primed_env_sys_jx_arr[i] = sys_vars_next_ids[i];
+			for (unsigned i = 0; i < env_vars_next_ids.size(); i++)
+				primed_env_sys_jx_arr[sys_vars_next_ids.size() + i] = env_vars_next_ids[i];
+			for (unsigned i = 0; i < jx.GetVarBDDCnt(); i++) {
+				primed_env_sys_jx_arr[sys_vars_next_ids.size() + env_vars_next_ids.size() + i] = jx.NextIDs()[i];
+			}
+			nextV_BDDset = bdd_makeset(primed_env_sys_jx_arr, sys_vars_next_ids.size() + env_vars_next_ids.size() + jx.GetVarBDDCnt());
+		}
+
+		//exist v' from V: env_pr, sys_pr or jx_pr
+		return bdd_exist(fun, nextV_BDDset);
+	}// end forsome_next_V
+
+	bdd step(bdd phi) { // function is named cox in the 'Piterman2006' article
+		static bdd sys_next_bdd = bddtruepp;
+		if (sys_next_bdd == bddtruepp) {// this condition is used to initialise sys_next_bdd only once
+			std::vector<int> sys_varsIDs = sys.GetVariablesNextIds();
 			int* sys_next_arr = new int[sys_varsIDs.size()];
 
 			for (unsigned i = 0; i < sys_varsIDs.size(); i++)
@@ -954,17 +945,21 @@ private:
 			sys_next_bdd = bdd_makeset(sys_next_arr, sys_varsIDs.size());
 		}
 		//p_e => \exist y' such that (p_s and phi(x',y'))
-		
-		bdd temp = bdd_exist(sys.GetTransition() & Next(phi), sys_next_bdd);
-		long t = clock();//!!!!!!!!!delete this
-		bdd res = bdd_imp(env.GetTransition(), temp);
-		winm_time += clock() - t;//!!!!!!!!!delete this
+		bdd res = bdd_imp(env.GetTransition(), bdd_exist(sys.GetTransition() & Next(phi), sys_next_bdd));
 		
 		//\foreach x'
-		std::vector<int> env_next_IDs = env.GetVariablesNextIds();
-		for (unsigned i = 0; i < env_next_IDs.size(); i++)
-			res = bdd_forall(res, bdd_ithvarpp(env_next_IDs[i]));//////!!!!!!!!!!!!!!!!!!!!!!!!!!
-		return res;
+		static bdd env_next_bdd = bddtruepp;
+		if (env_next_bdd == bddtruepp) {// this condition is used to initialise env_next_bdd only once
+			std::vector<int> env_next_IDs = env.GetVariablesNextIds();
+			int* env_next_arr = new int[env_next_IDs.size()];
+
+			for (unsigned i = 0; i < env_next_IDs.size(); i++)
+				env_next_arr[i] = env_next_IDs[i];
+
+			env_next_bdd = bdd_makeset(env_next_arr, env_next_IDs.size());
+		}
+
+		return bdd_forall(res, env_next_bdd);
 	}// end step(cox)
 
 	bdd greatestFixPoint(bdd & z, bdd & start, int i) {
@@ -1022,24 +1017,20 @@ private:
 	}// end reduce
 
 	State GetState(bdd allVarsBDD, bool ifFrom) {
-		bdd bddState = allVarsBDD;//delete later bddState!!!
-		if (ifFrom) {//we receive transition BDD, if we should take from-state, we delete all primed variables
-			bddState = forsome_next_V(bddState);
-		} else {
-			//we delete all unprimed variables (from-states) and unprime other (primed) variables - we convert to-states into from-states
-			bddState = UnprimeAll(forsome_V(bddState));
-		}
+		bdd bddState = ifFrom
+			? forsome_next_V(allVarsBDD)//if we should take from-state, we delete all primed variables
+			: bddState = UnprimeAll(forsome_V(allVarsBDD));//we delete all unprimed variables (from-states) and unprime other (primed) variables: we convert to-states into from-states
 		
 		State state;
 
-		// set Name
+		// set Name:
 		state.name = "s";
-
 		for (unsigned i = 0; i < bdd_varnum(); i++) {
 			if ((bddState & bdd_ithvarpp(i)) == bddfalsepp) state.name += "0";
 			if ((bddState & bdd_nithvarpp(i)) == bddfalsepp) state.name += "1";
 		}
-		// set Title
+
+		// set Title:
 		state.title = "";
 		std::vector<Variable> env_vars = env.GetInternalVariables();
 		std::vector<Variable> sys_vars = sys.GetInternalVariables();
@@ -1050,29 +1041,23 @@ private:
 		state.title += " ";
 		state.title += jx.GetNameFromBDD_DOT(bddState);
 
+		// set Initial:
 		state.initial = ((env.GetInitial() & sys.GetInitial() & bddState) != bddfalsepp) ? true : false;
 
 		return state;
     }
 public:
-	GRGame() {}
-
 	GRGame(SMVModule environment, SMVModule system) {
 		env = environment;
 		sys = system;
 		y_strat.resize(sys.GetJustice().size());
 		x_strat.resize(sys.GetJustice().size());
-	}
-	
-	GRGame& operator=(const GRGame& other) {
-        GRGame tmp(other);
-        std::swap(*this, tmp);
-        return *this;
-    }
-	
-	~GRGame() {
-		x_strat.clear();
-		y_strat.clear();
+
+		// set JX variables:
+		std::vector<int> from0toN;
+		for (unsigned i = 0; i < sys.GetJustice().size(); i++)
+			from0toN.push_back(i);
+		jx = Variable(" jx", from0toN);//I give such name (" jx") because it can not be assigned for the other variables (parser doesn't allow to create the names like this).
 	}
 	
 	bdd WinningRegion() {
@@ -1088,25 +1073,10 @@ public:
 	}// end WinningRegion
 
 	bdd getConroller(bdd z) {
-		std::vector<bdd> fromjx, tojx;
-		bdd trans = bddfalse;
-
-		unsigned sysJ_cnt = sys.GetJustice().size();
-		unsigned jx1 = bdd_varnum();//jx1 position
-		//!!!потом перенести добавление переменных jx в инициализацию и проверить, изменилось ли врем€.
-
-		std::vector<int> from0toN;
-		for (unsigned i = 0; i < sysJ_cnt; i++)
-			from0toN.push_back(i);
-		jx = Variable(" jx", from0toN);//I give such name (" jx") because it can not be assigned for the other variables (parser doesn't allow to create the names like this).
-
-		for (unsigned i = 0; i < sysJ_cnt; i++) {
-			fromjx.push_back(jx.varValueBDD(from0toN[i]));
-			tojx.push_back(jx.nextVarValueBDD(from0toN[i]));
-		}
-		// проверить: должно быть fromjx[i] == jx.varValueBDD(""+i)
-
 		unsigned envJ_cnt = env.GetJustice().size();
+		unsigned sysJ_cnt = sys.GetJustice().size();
+
+		bdd trans = bddfalse;
 
 		for (unsigned j = 0; j < sysJ_cnt; j++) {
 			trans |= jx.varValueBDD(j) & jx.nextVarValueBDD((j + 1) % sysJ_cnt) & z & sys.GetJustice()[j] & env.GetTransition() & sys.GetTransition() & Next(z);
@@ -1163,7 +1133,7 @@ public:
 
 	void printDot(std::string fileName, bdd bddtrans) {
 		std::ofstream out(fileName);
-		if (!out.is_open()) return;//throw Exception!!!
+		if (!out.is_open()) throw("Error while printing controller. File '" + fileName + "' can not be opened.");
 
 		bdd nonPrinted_trans = GetAllReachableTrans(bddtrans);
 		bdd trans_curr_bdd;
@@ -1198,44 +1168,14 @@ public:
 		}
 		out<<"}"<<std::endl;
 	}// end printDot
-	
-	bdd forsome_next_V(bdd fun) {//[TA] put it to private!!!
-		std::vector<int> sys_vars_next_ids = sys.GetVariablesNextIds();
-		std::vector<int> env_vars_next_ids = env.GetVariablesNextIds();
-
-		int *primed_env_sys_jx_arr = new int[sys_vars_next_ids.size() + env_vars_next_ids.size() + jx.GetVarBDDCnt()];
-
-		for (unsigned i = 0; i < sys_vars_next_ids.size(); i++)
-			 primed_env_sys_jx_arr[i] = sys_vars_next_ids[i];
-		for (unsigned i = 0; i < env_vars_next_ids.size(); i++)
-			primed_env_sys_jx_arr[sys_vars_next_ids.size() + i] = env_vars_next_ids[i];
-		for (unsigned i = 0; i < jx.GetVarBDDCnt(); i++) {
-			primed_env_sys_jx_arr[sys_vars_next_ids.size() + env_vars_next_ids.size() + i] = jx.NextIDs()[i];
-		}
-
-		//exist v' from V: env_pr, sys_pr or jx_pr
-		bdd nextV_BDDset = bdd_makeset(primed_env_sys_jx_arr, sys_vars_next_ids.size() + env_vars_next_ids.size() + jx.GetVarBDDCnt());
-		return bdd_exist(fun, nextV_BDDset);
-	}// end forsome_next_V
-
 };// end class GRGame
 
-void printFullSAT(bdd tmp) {//!!!! delete this
-	std::ofstream out("tmp.txt");
-	while (tmp != bddfalsepp) {
-		bdd tmp1 = bdd_fullsatone(tmp);
-		out << tmp1 << "\n";
-		tmp &= !tmp1;
-	}
-}
 int main(void)
 {
 	try {
-		cox_cnt = 0;
-		FileText file("arbiter8.smv");
+		FileText file("arbiter3.smv");
 
 		file.readSMVModules();
-		winm_time = 0;//temp!!!!!!!!
 		SMVModule sys(*file.GetModule("sys"));
 		SMVModule env(*file.GetModule("env"));
 		GRGame arbiter2(env, sys);
@@ -1246,41 +1186,30 @@ int main(void)
 		}
 		long t2 = clock();
 		std::cout << "Win reg: " << t2 - t1 << std::endl;
-		std::cout << "Win reg from winm_time: " << winm_time << std::endl;
 		bdd jds = arbiter2.getConroller(win_reg);
 		long t3 = clock();
 		std::cout << "synthesis : " << t3 - t2 << std::endl;
 
-		arbiter2.removeStuttering(jds);//[TA] вообще, система переходов должна быть детерминированной по построению => она без дребезжани€!!!
-		jds = arbiter2.GetAllReachableTrans(jds); // если удалить недостижимые переходы, минимизаци€ пройдет быстрее. ј затем снова можно удалить недостижимые. ¬џ√ќƒЌќ!
+		arbiter2.removeStuttering(jds);
+		jds = arbiter2.GetAllReachableTrans(jds); // if we delete unreachable transitions minimisation will be faster. And then remove them one more time. Profit!
 
 		arbiter2.Minimize(jds);
 
-		arbiter2.removeStuttering(jds);//[TA] вообще, система переходов должна быть детерминированной по построению => она без дребезжани€!!!
+		arbiter2.removeStuttering(jds);
 		jds = arbiter2.GetAllReachableTrans(jds);
-		
-		//arbiter2.printDot("JDS_result.dot", jds);
+
 		std::cout << "minimize : " << clock() - t3 << std::endl;
 
-		std::cout << "cox cnt " << cox_cnt << "\n\n";
+		// for big GR-games should be commented: resulting controllers are HUGE!
+		arbiter2.printDot("JDS_result.dot", jds);
+
 		std::cout << "SAT count : " << bdd_satcount(jds) << std::endl;
-		//std::cout << "Node count: " << bdd_nodecount(jds) << std::endl;
 		//std::cout << "Controller nodes count: " << bdd_satcount(arbiter2.forsome_next_V(arbiter2.GetAllReachableTrans(jds)) & bdd_ithvar(0) & bdd_ithvar(2) & bdd_ithvar(4) & bdd_ithvar(6) & bdd_ithvar(8) & bdd_ithvar(10) & bdd_ithvar(12) & arbiter2.[0]) << std::endl;
 	}
-	catch(std::string err) {
+	catch(char *err) {
 		std::cout << err << std::endl;
 	}
 
 	system("pause");
 	return 0;
 }
-
-
-	/*
-	std::ofstream out;
-	out.open("sizes.txt");
-	out << "Time : " << clock() - t1 << std::endl;
-	out << "SAT count : " << bdd_satcount(trans) << std::endl;
-	out << "Node count: " << bdd_nodecount(trans) << std::endl;
-	out << "Controller nodes count: " << bdd_satcount(forsome_next_V(allReachableTrans(trans)) & bdd_ithfun(0, env1_pr, envCnt) & bdd_ithfun(0, sys1_pr, sysCnt) & tojx[0]) << std::endl;
-	out.close();*/
