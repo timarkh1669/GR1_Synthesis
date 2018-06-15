@@ -1,0 +1,113 @@
+MODULE main
+	VAR// [TA] if we change modules order from [s;e] to [e;s], the computation complexity will increase much higher
+		s : sys(e.r1, e.r2, e.r3, e.r4, e.r5, e.r6, e.r7, e.r8, e.r9, e.r10, e.r11, e.r12);
+		e : env(s.g1, s.g2, s.g3, s.g4, s.g5, s.g6, s.g7, s.g8, s.g9, s.g10, s.g11, s.g12);
+
+MODULE env(g1, g2, g3, g4, g5, g6, g7, g8, g9, g10, g11, g12)
+	VAR
+		r1 : boolean;
+		r2 : boolean;
+		r3 : boolean;
+		r4 : boolean;
+		r5 : boolean;
+		r6 : boolean;
+		r7 : boolean;
+		r8 : boolean;
+		r9 : boolean;
+		r10 : boolean;
+		r11 : boolean;
+		r12 : boolean;
+	ASSIGN
+		init(r1) := FALSE;
+		init(r2) := FALSE;
+		init(r3) := FALSE;
+		init(r4) := FALSE;
+		init(r5) := FALSE;
+		init(r6) := FALSE;
+		init(r7) := FALSE;
+		init(r8) := FALSE;
+		init(r9) := FALSE;
+		init(r10) := FALSE;
+		init(r11) := FALSE;
+		init(r12) := FALSE;
+	TRANS
+		((r1 != g1) -> (r1 <-> next(r1))) &
+		((r2 != g2) -> (r2 <-> next(r2))) &
+		((r3 != g3) -> (r3 <-> next(r3))) &
+		((r4 != g4) -> (r4 <-> next(r4))) &
+		((r5 != g5) -> (r5 <-> next(r5))) &
+		((r6 != g6) -> (r6 <-> next(r6))) &
+		((r7 != g7) -> (r7 <-> next(r7))) &
+		((r8 != g8) -> (r8 <-> next(r8))) &
+		((r9 != g9) -> (r9 <-> next(r9))) &
+		((r10 != g10) -> (r10 <-> next(r10))) &
+		((r11 != g11) -> (r11 <-> next(r11))) &
+		((r12 != g12) -> (r12 <-> next(r12)));
+	JUSTICE
+		!(r1 & g1);
+		!(r2 & g2);
+		!(r3 & g3);
+		!(r4 & g4);
+		!(r5 & g5);
+		!(r6 & g6);
+		!(r7 & g7);
+		!(r8 & g8);
+		!(r9 & g9);
+		!(r10 & g10);
+		!(r11 & g11);
+		!(r12 & g12);
+
+MODULE sys(r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12)
+	VAR
+		g1 : boolean;
+		g2 : boolean;
+		g3 : boolean;
+		g4 : boolean;
+		g5 : boolean;
+		g6 : boolean;
+		g7 : boolean;
+		g8 : boolean;
+		g9 : boolean;
+		g10 : boolean;
+		g11 : boolean;
+		g12 : boolean;
+	ASSIGN
+		init(g1) := FALSE;
+		init(g2) := FALSE;
+		init(g3) := FALSE;
+		init(g4) := FALSE;
+		init(g5) := FALSE;
+		init(g6) := FALSE;
+		init(g7) := FALSE;
+		init(g8) := FALSE;
+		init(g9) := FALSE;
+		init(g10) := FALSE;
+		init(g11) := FALSE;
+		init(g12) := FALSE;
+	TRANS
+		((r1 <-> g1) -> (g1 <-> next(g1))) &
+		((r2 <-> g2) -> (g2 <-> next(g2))) &
+		((r3 <-> g3) -> (g3 <-> next(g3))) &
+		((r4 <-> g4) -> (g4 <-> next(g4))) &
+		((r5 <-> g5) -> (g5 <-> next(g5))) &
+		((r6 <-> g6) -> (g6 <-> next(g6))) &
+		((r7 <-> g7) -> (g7 <-> next(g7))) &
+		((r8 <-> g8) -> (g8 <-> next(g8))) &
+		((r9 <-> g9) -> (g9 <-> next(g9))) &
+		((r10 <-> g10) -> (g10 <-> next(g10))) &
+		((r11 <-> g11) -> (g11 <-> next(g11))) &
+		((r12 <-> g12) -> (g12 <-> next(g12))) &
+		!(g1 & g2 & g3 & g4 & g5 & g6 & g7 & g8 & g9 & g10 & g11 & g12);
+	JUSTICE
+		r1 <-> g1;
+		r2 <-> g2;
+		r3 <-> g3;
+		r4 <-> g4;
+		r5 <-> g5;
+		r6 <-> g6;
+		r7 <-> g7;
+		r8 <-> g8;
+		r9 <-> g9;
+		r10 <-> g10;
+		r11 <-> g11;
+		r12 <-> g12;

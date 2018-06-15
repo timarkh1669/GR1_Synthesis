@@ -1,0 +1,113 @@
+MODULE main
+	VAR
+		e : env(s.HMASTER, s.HMASTLOCK);
+		s : sys(e.HBUSREQ0, e.HBUSREQ1, e.BUSREQ, e.HLOCK0, e.HLOCK1, e.HREADY, e.HBURST);
+
+MODULE env(HMASTER, HMASTLOCK)
+	VAR
+		HBUSREQ0 : boolean;
+		HBUSREQ1 : boolean;
+		BUSREQ : boolean;
+		HLOCK0 : boolean;
+		HLOCK1 : boolean;
+		HREADY : boolean;
+		HBURST : {SINGLE, BURST4, INCR};
+		s : {0,1,2};
+	ASSIGN
+		init(s) := 0;																	//A1.3
+		init(HBUSREQ0) := FALSE;														// - A4
+		init(HBUSREQ1) := FALSE;														// - A4
+		init(HLOCK0) := FALSE;															// - A4
+		init(HLOCK1) := FALSE;															// - A4
+		init(HREADY) := FALSE;															// - A4!!! but in an example of behaviour it is TRUE! later check if it is TRUE
+		
+	TRANS
+		((HMASTER = 0) -> (BUSREQ <-> HBUSREQ0)) &											//A1.1
+		((HMASTER = 1) -> (BUSREQ <-> HBUSREQ1)) &											//A1.1
+		((s = 0) & !(HMASTLOCK & (HBURST = INCR)) -> next(s = 0)) &							// - A1.4
+		((s = 0) & HMASTLOCK & (HBURST = INCR) -> next(s = 1)) &							// - A1.4
+		(((s = 1) | (s = 2)) & BUSREQ -> next(s = 1)) &										// - A1.4
+		(((s = 1) | (s = 2)) & !BUSREQ & HMASTLOCK & (HBURST = INCR) -> next(s = 2)) &		// - A1.4
+		(((s = 1) | (s = 2)) & !BUSREQ & !(HMASTLOCK & (HBURST = INCR)) -> next(s = 0)) &	// - A1.4
+		(HLOCK0 -> HBUSREQ0) &																// - A3
+		(HLOCK1 -> HBUSREQ1);																// - A3
+
+	JUSTICE																					// all the JUSTICE requirements are prefixed by GF
+		(s = 0) | (s = 2);																	// - A1.5
+		HREADY;																				// - A2
+
+MODULE sys(HBUSREQ0, HBUSREQ1, BUSREQ, HLOCK0, HLOCK1, HREADY, HBURST)
+	VAR
+		HMASTER : {0,1};
+		HGRANT0 : boolean;
+		HGRANT1 : boolean;
+		DECIDE : boolean;
+		START : boolean;
+		HMASTLOCK : boolean;
+		LOCKED : boolean;
+		t : {0,1,2};
+		u : {0,1,2,3,4,5};
+		v1 : {0,1,2};
+	ASSIGN
+		init(DECIDE) := TRUE;																//G11
+		init(START) := TRUE;																//G11
+		init(HGRANT0) := TRUE;																//G11
+		init(HMASTER) := 0;																	//G11!!! HMASTER = 0???
+		init(HGRANT1) := FALSE;																//G11
+		init(HMASTLOCK) := FALSE;															//G11
+		init(t) := 0;																		// - G2.2
+		init(u) := 0;																		// - G3.3
+		init(v1) := 0;																		// - G10.1
+	TRANS
+		(!HREADY -> next(START = FALSE)) &													// - G1
+		((t = 0) & !(HMASTLOCK & (HBURST = INCR) & START) -> (next(t = 0))) &				// - G2.3
+		((t = 0) & HMASTLOCK & (HBURST = INCR) & START -> (next(t = 1))) &					// - G2.3
+		((t = 1) & !START & !BUSREQ -> (next(t = 0))) &										// - G2.3
+		((t = 1) & !START & BUSREQ -> (next(t = 1))) &										// - G2.3
+		((t = 1) & START -> (next(t = 2))) &												// - G2.3
+		((t = 2) -> next(t = 2)) & 															// - G2.3
+
+		((u = 0) & !(HMASTLOCK & (HBURST = BURST4) & START) -> next(u = 1)) &				// - G3.4
+		((u = 0) & HMASTLOCK & (HBURST = BURST4) & START & !HREADY -> next(u = 1)) &		// - G3.4
+		((u = 0) & HMASTLOCK & (HBURST = BURST4) & START & HREADY -> next(u = 2)) &			// - G3.4
+		((u = 1) & !START & !HREADY -> next(u = 1)) &										// - G3.4
+		((u = 1) & !START & HREADY -> next(u = 2)) &										// - G3.4
+		((u = 2) & !START & !HREADY -> next(u = 2)) &										// - G3.4
+		((u = 2) & !START & HREADY -> next(u = 3)) &										// - G3.4
+		((u = 3) & !START & !HREADY -> next(u = 3)) &										// - G3.4
+		((u = 3) & !START & HREADY -> next(u = 4)) &										// - G3.4
+		((u = 4) & !START & !HREADY -> next(u = 4)) &										// - G3.4
+		((u = 4) & !START & HREADY -> next(u = 0)) &										// - G3.4
+		(((u = 1) | (u = 2) | (u = 3) | (u = 4)) & START -> next(u = 5)) &					// - G3.4
+		((u = 5) -> next(u = 5)) &															// - G3.4
+
+		(HREADY -> (HGRANT0 <-> next(HMASTER = 0))) &										//G4
+		(HREADY -> (HGRANT1 <-> next(HMASTER = 1))) &										//G4
+
+		(HREADY -> (LOCKED <-> next(HMASTLOCK))) &											// - G5
+
+		(next(START = FALSE) -> (((HMASTER = 0) <-> next(HMASTER = 0))						// - G6
+			& ((HMASTER = 1) <-> next(HMASTER = 1))											// - G6
+			& (HMASTLOCK <-> next(HMASTLOCK)))) &											// - G6
+
+		(DECIDE & next(HGRANT0) -> (HLOCK0 <-> next(LOCKED))) &								// - G7
+		(DECIDE & next(HGRANT1) -> (HLOCK1 <-> next(LOCKED))) &								// - G7
+
+		(!DECIDE -> (HGRANT0 <-> next(HGRANT0))) &											// - G8
+		(!DECIDE -> (HGRANT1 <-> next(HGRANT1))) &											// - G8
+		(!DECIDE -> (LOCKED <-> next(LOCKED))) &											// - G8
+		
+		((v1 = 0) & !HGRANT1 & !HBUSREQ1 -> next(v1 = 0)) &									//G10.1
+		((v1 = 0) & HBUSREQ1 -> next(v1 = 1)) &												//G10.1
+		((v1 = 0) & HGRANT1 & !HBUSREQ1 -> next(v1 = 2)) &									//G10.1
+		((v1 = 1) -> next(v1 = 1)) &														//G10.1
+		((v1 = 2) -> next(v1 = 2)) &														//G10.1
+
+		(DECIDE & !HBUSREQ0 & !HBUSREQ1 -> next(HGRANT0));									//G10.2
+
+	JUSTICE
+		(t = 0) | (t = 1);																	// - G2.4
+		(u = 0) | (u = 1) | (u = 2) | (u = 3) | (u = 4);									// - G3.5 ??? may be !(u = 5)
+		!HBUSREQ0 | (HMASTER = 0); 															// - G9
+		!HBUSREQ1 | (HMASTER = 1); 															// - G9
+		(v1 = 0) | (v1 = 1);																// - G10.1
